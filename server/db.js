@@ -134,6 +134,7 @@ const MIGRATIONS = [
 ];
 
 export function openDb(file) {
+  if (process.env.VERCEL) file = '/tmp/app.db';
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const raw = new DatabaseSync(file);
   raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
