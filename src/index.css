@@ -1,0 +1,126 @@
+@import "tailwindcss";
+@import "@fontsource-variable/plus-jakarta-sans/wght.css";
+
+/* Warna & huruf aplikasi. Ubah di sini kalau mau ganti nuansa tampilan. */
+@theme {
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-ink: #171716;
+  --color-ink-soft: #33322f;
+  --color-paper: #f4f3ee;
+  --color-paper-deep: #eae8df;
+  --color-line: #e3e1d9;
+  --color-line-strong: #cbc9bf;
+  --color-muted: #66645d;
+  --color-faint: #8a8880;
+
+  /* Warna grafik: biru = uang masuk, oranye = uang keluar (aman untuk buta warna). */
+  --color-masuk: #2a78d6;
+  --color-keluar: #eb6834;
+  --color-masuk-soft: #e3eefb;
+  --color-keluar-soft: #fde9df;
+
+  /* Warna status: selalu ditemani ikon + tulisan, tidak pernah warna saja. */
+  --color-good: #006300;
+  --color-good-soft: #e3f3e3;
+  --color-warn: #8a5a00;
+  --color-warn-fill: #fab219;
+  --color-warn-soft: #fdf0cf;
+  --color-bad: #b3261e;
+  --color-bad-fill: #d03b3b;
+  --color-bad-soft: #fbe4e2;
+
+  --shadow-pop: 0 12px 40px -12px rgb(23 23 22 / 0.28), 0 2px 8px -2px rgb(23 23 22 / 0.08);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-white font-sans text-ink antialiased;
+    font-feature-settings: "ss01";
+  }
+  ::selection {
+    background: #171716;
+    color: #f4f3ee;
+  }
+  :focus-visible {
+    outline: 2px solid #171716;
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"],
+  summary,
+  select,
+  label[for] {
+    cursor: pointer;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.55;
+  }
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes dot {
+  0%, 60%, 100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+@utility animate-pop {
+  animation: pop-in 0.18s ease-out;
+}
+@utility animate-fade {
+  animation: fade-in 0.15s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Saat dicetak / disimpan sebagai PDF: hanya isi laporan yang tampil. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-plain {
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  body {
+    background: #fff;
+  }
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  @page {
+    margin: 16mm;
+  }
+}
