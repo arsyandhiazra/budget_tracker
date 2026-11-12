@@ -31,6 +31,10 @@ npm start       # menyalakan aplikasi
 
 Buka <http://localhost:3000> di browser. Untuk mematikan, tekan `Ctrl + C` di terminal.
 
+Di laptop, data disimpan di folder `data/pglite` (database Postgres lokal), jadi tidak
+perlu memasang apa-apa dan datanya tidak hilang walaupun aplikasi dimatikan. Kalau
+kamu mengisi `DATABASE_URL` di `.env`, aplikasi memakai database itu.
+
 ### Mau langsung lihat isinya?
 
 ```bash
@@ -90,7 +94,7 @@ Yang perlu kamu tahu:
 | --- | --- |
 | `npm run dev` | Mode pengembangan. Buka <http://localhost:5173>; perubahan kode langsung terlihat |
 | `npm run build` | Membuat ulang tampilan (folder `dist`). **Wajib dijalankan setelah mengubah isi folder `src`** |
-| `npm test` | Menjalankan tes otomatis bagian server |
+| `npm test` | Menjalankan tes otomatis bagian server (memakai database lokal sementara). Isi `TEST_DATABASE_URL` kalau mau menguji di Postgres sungguhan |
 | `npm run typecheck` | Memeriksa kode tampilan |
 
 ## Susunan folder
@@ -99,7 +103,7 @@ Yang perlu kamu tahu:
 server/            ← "dapur": menyimpan data, mengurus akun, menghitung laporan
   index.js           titik mulai
   app.js             merakit server + pengaman
-  db.js              struktur tabel (SQLite, satu file di folder data/)
+  db.js              struktur tabel + sambungan ke database (Postgres)
   accounting.js      inti pembukuan dan semua laporan
   routes/auth.js     daftar, verifikasi, masuk, lupa kata sandi
   routes/api.js      transaksi, utang-piutang, anggaran, laporan, kontak
@@ -111,36 +115,120 @@ src/               ← "ruang makan": semua yang terlihat di layar
   components/        tombol, grafik, menu samping, chatbot
   index.css          warna dan huruf (ubah di sini untuk ganti nuansa)
 dist/              ← tampilan yang sudah jadi (dibuat oleh npm run build)
-data/              ← file database (muncul otomatis saat pertama dijalankan)
+data/              ← database lokal untuk laptop (hanya muncul kalau DATABASE_URL kosong)
 ```
 
 Ibaratnya: `src` adalah ruang makan yang dilihat tamu, `server` adalah dapur yang
 memasak pesanan, dan `data` adalah lemari penyimpanan.
 
-## Menaruh aplikasi online
+## Deploy gratis: Vercel + Neon
 
-Aplikasi ini punya server, jadi **tidak bisa ditaruh di GitHub Pages** (yang hanya
-bisa menampilkan halaman diam). Pakai hosting yang bisa menjalankan Node.js dan punya
-penyimpanan tetap untuk file database (misalnya VPS, atau layanan dengan fitur
-"persistent disk").
+Hasil akhirnya: aplikasi online di alamat `https://nama-kamu.vercel.app`, siapa pun bisa
+daftar dan masuk, dan datanya tersimpan permanen di database Postgres.
 
-Yang perlu diatur di hosting:
+| Bagian | Layanan | Biaya |
+| --- | --- | --- |
+| Tampilan + server | [Vercel](https://vercel.com) | Gratis (paket Hobby) |
+| Database permanen | [Neon](https://neon.tech) (Postgres) | Gratis (ada batas ukuran, lihat catatan) |
+| Email kode verifikasi | Gmail atau [Brevo](https://www.brevo.com) | Gratis (ada batas kiriman per hari) |
 
-- Perintah mulai: `npm start`
-- `NODE_ENV=production`
-- `APP_URL` = alamat aplikasimu
-- `DB_PATH` = lokasi file database di penyimpanan tetap
-- `SMTP_...` wajib diisi (di production kode verifikasi tidak ditampilkan di layar)
-- Pastikan alamatnya memakai **https**
+Semua langkah di bawah dilakukan di browser. Tidak ada yang perlu dipasang.
 
-Cadangkan folder `data/` secara berkala. Pengguna juga bisa mengunduh cadangan
-datanya sendiri dari menu Pengaturan.
+### Langkah 1. Siapkan email pengirim
+
+Aplikasi mengirim kode 6 angka ke email pengguna baru, jadi butuh akun email pengirim.
+Cara termudah memakai Gmail milikmu (batas Google sekitar 500 email per hari):
+
+1. Buka <https://myaccount.google.com/security> lalu aktifkan **Verifikasi 2 Langkah**.
+2. Buka <https://myaccount.google.com/apppasswords>, buat sandi aplikasi baru (nama bebas,
+   mis. "Budget Tracker"). Salin 16 huruf yang muncul.
+3. Simpan, nanti dipakai di Langkah 3:
+
+   | Nama | Isi |
+   | --- | --- |
+   | `SMTP_HOST` | `smtp.gmail.com` |
+   | `SMTP_PORT` | `587` |
+   | `SMTP_USER` | alamat Gmail kamu |
+   | `SMTP_PASS` | 16 huruf sandi aplikasi (**bukan** kata sandi Gmail) |
+   | `SMTP_FROM` | `Budget Tracker <alamat-gmail-kamu@gmail.com>` |
+
+Penggunanya ramai? Pakai Brevo (menu *SMTP & API*), isinya sama bentuknya.
+
+### Langkah 2. Buat database gratis di Neon
+
+1. Daftar di <https://neon.tech> (bisa dengan akun GitHub atau Google).
+2. Klik **New Project**. Beri nama `budget-tracker`. Pada **Region** pilih
+   **AWS Asia Pacific (Singapore)** supaya dekat dengan server Vercel (`sin1`) dan pengguna di Indonesia.
+3. Setelah proyek jadi, klik **Connect**. Nyalakan **Connection pooling**, lalu salin
+   alamat yang muncul. Bentuknya:
+   `postgresql://pengguna:sandi@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require`
+4. Alamat itu adalah **rahasia** (isinya kata sandi database). Jangan ditempel di GitHub atau chat.
+
+Tabel tidak perlu dibuat sendiri: aplikasi membuatnya otomatis saat pertama kali dijalankan.
+
+### Langkah 3. Deploy ke Vercel
+
+1. Pastikan kode ini ada di GitHub, di cabang yang akan dipakai sebagai versi utama
+   (biasanya `main`). Kalau kamu bekerja di cabang lain, gabungkan dulu ke `main` lewat Pull Request.
+2. Daftar di <https://vercel.com> dengan akun GitHub, lalu klik **Add New → Project**
+   dan pilih repositori `budget_tracker`.
+3. Vercel mengenali proyek ini otomatis (Vite). Biarkan pengaturan build apa adanya.
+4. Buka bagian **Environment Variables**, lalu isi satu per satu:
+
+   | Nama | Isi | Wajib? |
+   | --- | --- | --- |
+   | `DATABASE_URL` | alamat dari Neon (Langkah 2) | **Ya** |
+   | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | dari Langkah 1 | **Ya** |
+   | `AI_PROVIDER`, `AI_API_KEY` | untuk chatbot AI (lihat bagian Chatbot AI di atas) | Tidak |
+
+   Jalan pintas untuk database: di Vercel buka tab **Storage** → **Neon** → buat database;
+   Vercel mengisi `DATABASE_URL` otomatis.
+5. Klik **Deploy**. Tunggu sekitar satu menit sampai muncul alamat `https://....vercel.app`.
+
+### Langkah 4. Uji, supaya yakin ini sungguhan
+
+1. Buka alamatnya dan **daftar dengan emailmu sendiri**. Kode 6 angka harus masuk ke emailmu
+   (cek folder Spam kalau belum terlihat).
+2. Selesaikan pengaturan awal, lalu catat satu transaksi.
+3. Keluar, lalu masuk lagi dengan email dan kata sandi tadi.
+4. Di Vercel buka **Deployments → ⋯ → Redeploy**. Setelah selesai, masuk lagi. Akun dan
+   transaksimu masih ada: itu tandanya database permanen.
+5. Bagikan alamatnya. Setiap perubahan kode yang kamu dorong ke `main` akan dideploy otomatis.
+
+### Kalau ada yang tidak jalan
+
+| Gejala | Penyebab | Perbaikan |
+| --- | --- | --- |
+| "Server belum siap (database belum tersambung)" | `DATABASE_URL` kosong atau salah | Periksa di Vercel → Settings → Environment Variables, lalu **Redeploy** |
+| "Email tidak berhasil dikirim" | `SMTP_...` kosong atau salah | Pastikan memakai sandi aplikasi 16 huruf, bukan kata sandi Gmail. Lihat log di Vercel → Logs |
+| Permintaan pertama setelah lama sepi terasa lambat (1–3 detik) | Neon gratis "tidur" saat sepi | Wajar. Permintaan berikutnya cepat |
+| Mengubah variabel tapi tidak ada efek | Variabel hanya terbaca saat deploy | **Redeploy** setelah mengubahnya |
+
+### Catatan penting
+
+- **Batas paket gratis.** Neon gratis punya batas penyimpanan (sekitar 0,5 GB per proyek)
+  dan riwayat pemulihan yang singkat. Teks catatan keuangan itu kecil, jadi ini cukup untuk
+  ribuan pengguna kecil, tetapi cek batas terbaru di situs Neon.
+- **Vercel Hobby untuk pemakaian pribadi/non-komersial.** Kalau aplikasi ini dipakai untuk
+  bisnis berbayar, ketentuan Vercel mengharuskan paket Pro. Alternatifnya, jalankan di
+  hosting lain (lihat bawah). Kodenya sama.
+- **Cadangan.** Minta pengguna mengunduh cadangan dari menu Pengaturan secara berkala. Untuk
+  seluruh database, pakai `pg_dump "$DATABASE_URL" > cadangan.sql`.
+- **Domain sendiri.** Di Vercel buka **Settings → Domains**, ikuti petunjuknya (gratis, domain-nya beli sendiri).
+
+### Memakai hosting lain
+
+Kodenya tidak terikat Vercel. Di hosting yang menjalankan Node.js (Render, Railway, Fly.io,
+VPS), isi `NODE_ENV=production`, `DATABASE_URL`, `SMTP_...`, `APP_URL`, lalu jalankan
+`npm run build` sekali dan `npm start` sebagai perintah mulai. Tidak butuh disk permanen,
+karena datanya ada di Postgres.
 
 ## Keamanan yang sudah dipasang
 
 - Kata sandi disimpan dalam bentuk acakan satu arah (scrypt), tidak pernah apa adanya.
 - Sesi login memakai cookie `HttpOnly` yang tidak bisa dibaca skrip di halaman.
-- Percobaan login, daftar, dan kode verifikasi dibatasi supaya tidak bisa ditebak berulang-ulang.
+- Percobaan login, daftar, dan kode verifikasi dibatasi supaya tidak bisa ditebak berulang-ulang
+  (catatannya di database, jadi tetap berlaku di hosting serverless).
 - Setiap data selalu disaring per pemilik akun; pengguna lain tidak bisa melihat atau mengubahnya.
 - Ganti/atur ulang kata sandi otomatis mengeluarkan perangkat lain.
 - Semua isian diperiksa di server, dan setiap jurnal dijamin seimbang (debit = kredit).

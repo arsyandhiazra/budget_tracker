@@ -55,7 +55,10 @@ export function loadConfig(overrides = {}) {
     port,
     host: env.HOST || (production ? '0.0.0.0' : '127.0.0.1'),
     appUrl: (env.APP_URL || `http://localhost:${port}`).replace(/\/+$/, ''),
-    dbPath: env.DB_PATH || path.join(ROOT, 'data', 'budget-tracker.db'),
+    // Alamat database Postgres. Neon/Vercel mengisinya sebagai DATABASE_URL atau POSTGRES_URL.
+    // Kosong = (hanya di laptop) database lokal PGlite di folder data/pglite.
+    databaseUrl: String(env.DATABASE_URL || env.POSTGRES_URL || '').trim(),
+    pgliteDir: env.PGLITE_DIR || path.join(ROOT, 'data', 'pglite'),
     distDir: path.join(ROOT, 'dist'),
     sessionDays: Number(env.SESSION_DAYS) || 30,
     // Hosting (Render, Railway, dll.) menaruh aplikasi di belakang proxy HTTPS. Dengan

@@ -74,7 +74,7 @@ test('chatbot mode dasar menjawab dari data asli', async () => {
     // Pesan kosong / kepanjangan ditolak; terlalu cepat dibatasi
     assert.equal((await c.post('/api/chat', { message: '   ' })).status, 400);
     assert.equal((await c.post('/api/chat', { message: 'x'.repeat(1001) })).status, 400);
-    s.limiter.reset(`chat:${(await c.get('/api/auth/me')).data.user.id}`);
+    await s.limiter.reset(`chat:${(await c.get('/api/auth/me')).data.user.id}`);
     let last;
     for (let i = 0; i < 16; i += 1) last = await c.post('/api/chat', { message: 'saldo', today: '2026-03-15' });
     assert.equal(last.status, 429);

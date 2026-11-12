@@ -204,7 +204,7 @@ test('ubah & hapus: angka ikut berubah, catatan terhubung terlindungi', async ()
     assert.equal(await balance('Kas'), 5_000_000);
 
     // Catatan utang tidak bisa dihapus/diubah lewat jalur umum
-    const debtEntry = s.db.get('SELECT entry_id FROM debts WHERE id = ?', ids.d7).entry_id;
+    const debtEntry = (await s.db.get('SELECT entry_id FROM debts WHERE id = ?', ids.d7)).entry_id;
     assert.equal((await c.del(`/api/entries/${debtEntry}`)).status, 400);
     assert.equal((await c.patch(`/api/journal/${debtEntry}`, { date: '2026-01-11', description: 'x', lines: [] })).status, 400);
 
@@ -225,7 +225,7 @@ test('ubah & hapus: angka ikut berubah, catatan terhubung terlindungi', async ()
     assert.equal((await c.del(`/api/debts/${ids.d7}`)).status, 200);
     assert.equal(await balance('Utang Pinjaman'), 0);
     assert.equal(await balance('Bank'), 5_800_000, 'uang pinjaman dan pelunasannya ikut terhapus');
-    assert.equal(s.db.get('SELECT COUNT(*) AS n FROM debt_payments WHERE debt_id = ?', ids.d7).n, 0);
+    assert.equal((await s.db.get('SELECT COUNT(*) AS n FROM debt_payments WHERE debt_id = ?', ids.d7)).n, 0);
 
     // Ubah jurnal manual
     r = await c.patch(`/api/journal/${ids.j13}`, {

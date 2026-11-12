@@ -10,7 +10,7 @@ import { createChat } from './routes/chat.js';
 
 export function createApp({ db, config, mailer, fetchImpl = fetch }) {
   const app = express();
-  const limiter = new RateLimiter();
+  const limiter = new RateLimiter(db);
   app.locals.limiter = limiter;
   app.disable('x-powered-by');
   if (config.trustProxy) app.set('trust proxy', 1);
@@ -76,6 +76,8 @@ export function createApp({ db, config, mailer, fetchImpl = fetch }) {
     }
     if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: { code: 'INVALID', message: 'Data yang dikirim tidak bisa dibaca.' } });
     if (err?.type === 'entity.too.large') return res.status(413).json({ error: { code: 'TOO_LARGE', message: 'Data yang dikirim terlalu besar.' } });
+    // Dua permintaan yang bentrok (mis. daftar dengan email yang sama bersamaan).
+    if (err?.code === '23505') return res.status(409).json({ error: { code: 'CONFLICT', message: 'Data ini sudah ada atau baru saja diubah. Muat ulang lalu coba lagi.' } });
     if (err?.status === 404) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Tidak ditemukan.' } });
     console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`, err);
     return res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'Terjadi kesalahan di server. Coba lagi sebentar lagi.' } });

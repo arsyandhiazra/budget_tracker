@@ -1,14 +1,24 @@
 // Alat bantu tes: menyalakan server sungguhan di memori (database sementara),
 // lalu memanggilnya lewat HTTP seperti yang dilakukan browser.
 import { loadConfig } from '../config.js';
+import crypto from 'node:crypto';
 import { openDb } from '../db.js';
 import { createApp } from '../app.js';
+
+// Database untuk tes. Kalau TEST_DATABASE_URL diisi, tes berjalan di Postgres asli
+// (tiap tes memakai "schema" sendiri yang dihapus setelahnya). Kalau tidak, dipakai
+// PGlite di memori, jadi "npm test" jalan tanpa memasang apa-apa.
+export function testDb() {
+  const url = process.env.TEST_DATABASE_URL;
+  if (!url) return openDb({});
+  return openDb({ url, schema: `t_${crypto.randomBytes(6).toString('hex')}`, dropSchemaOnClose: true, max: 4 });
+}
 
 export async function startServer({ ai, production = false, fetchImpl } = {}) {
   const config = loadConfig({ skipEnvFile: true, quiet: true, env: { NODE_ENV: production ? 'production' : 'test', AI_PROVIDER: '', AI_API_KEY: '', SMTP_HOST: '' } });
   config.distDir = '/nonexistent';
   if (ai) config.ai = { ...config.ai, ...ai, enabled: true };
-  const db = openDb(':memory:');
+  const db = await testDb();
   const mails = [];
   const mailer = {
     configured: true, // seperti SMTP aktif: kode TIDAK ikut dikembalikan ke browser
@@ -67,9 +77,8 @@ export async function startServer({ ai, production = false, fetchImpl } = {}) {
     base, db, config, mails, client, lastCode, signUp,
     limiter: app.locals.limiter,
     async close() {
-      app.locals.limiter.stop();
       await new Promise((resolve) => server.close(resolve));
-      db.close();
+      await db.close();
     },
   };
 }
