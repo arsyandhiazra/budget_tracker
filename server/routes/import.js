@@ -14,8 +14,12 @@ export function createImport({ db, limiter }) {
     includeDuplicates: req.query.duplicates === 'include',
     skipErrors: flag(req.query.skipErrors),
   });
+  const MAX_BYTES = 3 * 1024 * 1024;
   const fileOf = (req) => {
     if (!Buffer.isBuffer(req.body) || !req.body.length) throw bad('File belum dipilih.');
+    // Di hosting serverless, isi permintaan bisa sudah dibaca platform sebelum sampai ke sini,
+    // jadi batas ukuran dicek lagi di sini.
+    if (req.body.length > MAX_BYTES) throw new HttpError(413, 'File terlalu besar (maksimal 3 MB).', 'TOO_LARGE');
     return req.body;
   };
   async function limit(req) {

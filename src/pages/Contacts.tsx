@@ -1,6 +1,7 @@
 // Halaman Kontak: pelanggan, pemasok, karyawan, dan lainnya.
 import { useEffect, useState, type FormEvent } from "react";
 import { Pencil, Plus, Trash2, Users } from "lucide-react";
+import { WriteOnly } from "@/lib/book";
 import { api, errorMessage, useData } from "@/lib/api";
 import { rp } from "@/lib/format";
 import type { Contact } from "@/lib/types";
@@ -114,18 +115,22 @@ export function ContactsPage() {
   return (
     <Page>
       <PageHeader title="Kontak" description="Orang atau pihak yang sering bertransaksi denganmu. Berguna untuk melacak utang dan piutang per nama.">
-        <Button onClick={() => setForm({ open: true, edit: null })}>
-          <Plus className="h-4 w-4" aria-hidden /> Tambah kontak
-        </Button>
+        <WriteOnly>
+          <Button onClick={() => setForm({ open: true, edit: null })}>
+            <Plus className="h-4 w-4" aria-hidden /> Tambah kontak
+          </Button>
+        </WriteOnly>
       </PageHeader>
       <DataState state={state}>
         {(data) => (
           <Card>
             {data.contacts.length === 0 ? (
               <Empty icon={<Users className="h-5 w-5" aria-hidden />} title="Belum ada kontak" text="Kontak juga otomatis dibuat saat kamu mencatat utang atau piutang dengan nama baru.">
-                <Button onClick={() => setForm({ open: true, edit: null })}>
-                  <Plus className="h-4 w-4" aria-hidden /> Tambah kontak
-                </Button>
+                <WriteOnly>
+                  <Button onClick={() => setForm({ open: true, edit: null })}>
+                    <Plus className="h-4 w-4" aria-hidden /> Tambah kontak
+                  </Button>
+                </WriteOnly>
               </Empty>
             ) : (
               <div className="relative overflow-x-auto">
@@ -157,12 +162,14 @@ export function ContactsPage() {
                         <td className={`${td} tnum text-right whitespace-nowrap`}>{c.payable ? <span className="font-semibold">{rp(c.payable)}</span> : <span className="text-faint">-</span>}</td>
                         <td className={`${td} tnum text-right whitespace-nowrap`}>{c.receivable ? <span className="font-semibold">{rp(c.receivable)}</span> : <span className="text-faint">-</span>}</td>
                         <td className={`${td} no-print text-right whitespace-nowrap`}>
-                          <Button variant="ghost" size="icon" aria-label={`Ubah ${c.name}`} title="Ubah" onClick={() => setForm({ open: true, edit: c })}>
-                            <Pencil className="h-4 w-4" aria-hidden />
-                          </Button>
-                          <Button variant="ghost" size="icon" aria-label={`Hapus ${c.name}`} title="Hapus" onClick={() => remove(c)}>
-                            <Trash2 className="h-4 w-4" aria-hidden />
-                          </Button>
+                          <WriteOnly>
+                            <Button variant="ghost" size="icon" aria-label={`Ubah ${c.name}`} title="Ubah" onClick={() => setForm({ open: true, edit: c })}>
+                              <Pencil className="h-4 w-4" aria-hidden />
+                            </Button>
+                            <Button variant="ghost" size="icon" aria-label={`Hapus ${c.name}`} title="Hapus" onClick={() => remove(c)}>
+                              <Trash2 className="h-4 w-4" aria-hidden />
+                            </Button>
+                          </WriteOnly>
                         </td>
                       </tr>
                     ))}

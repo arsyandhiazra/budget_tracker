@@ -13,6 +13,10 @@ export function rp(n: number): string {
 
 export const num = (n: number) => nf.format(Math.round(n));
 
+/** Angka dengan desimal apa adanya (mis. jumlah 1,5 jam atau pajak 11,5%). */
+const nfDec = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 3 });
+export const dec = (n: number) => nfDec.format(n);
+
 /** Angka ringkas untuk sumbu grafik & label: 1,2 jt · 850 rb · 2,5 M */
 export function compact(n: number): string {
   const v = Math.abs(n);

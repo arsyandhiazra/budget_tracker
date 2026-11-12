@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api, errorMessage, useData } from "@/lib/api";
+import { useBook } from "@/lib/book";
 import { addMonths, fmtMonth, rp, today } from "@/lib/format";
 import type { BudgetItem, BudgetStatus } from "@/lib/types";
 import { BudgetStatusLabel, Meter, budgetTone } from "@/components/charts";
@@ -10,6 +11,7 @@ import { Button, Card, DataState, MoneyInput, PageHeader, useFeedback } from "@/
 
 export function BudgetsPage() {
   const { toast } = useFeedback();
+  const { canWrite } = useBook();
   const thisMonth = today().slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
   const [drafts, setDrafts] = useState<Record<number, number>>({});
@@ -110,7 +112,11 @@ export function BudgetsPage() {
                           )}
                         </div>
                         <div className="no-print">
-                          <MoneyInput ariaLabel={`Batas per bulan untuk ${item.name}`} value={draft} placeholder="Batas per bulan" onChange={(n) => setDrafts((d) => ({ ...d, [item.accountId]: n }))} onBlur={() => save(item)} onEnter={() => save(item)} />
+                          {canWrite ? (
+                            <MoneyInput ariaLabel={`Batas per bulan untuk ${item.name}`} value={draft} placeholder="Batas per bulan" onChange={(n) => setDrafts((d) => ({ ...d, [item.accountId]: n }))} onBlur={() => save(item)} onEnter={() => save(item)} />
+                          ) : (
+                            <p className="tnum text-sm text-muted">Batas: {item.budget > 0 ? rp(item.budget) : "-"}</p>
+                          )}
                         </div>
                       </li>
                     );

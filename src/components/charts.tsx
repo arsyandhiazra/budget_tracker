@@ -9,7 +9,8 @@ import { cn } from "@/utils/cn";
 import { compact, fmtDate, fmtDay, rp, rpCompact } from "@/lib/format";
 import { Card } from "./ui";
 
-export const COLORS = { masuk: "#2a78d6", keluar: "#eb6834", ink: "#171716", grid: "#e3e1d9", axis: "#cbc9bf", muted: "#66645d", band: "#f4f3ee" };
+// Warna grafik mengikuti tema (terang/gelap) lewat variabel CSS di index.css.
+export const COLORS = { masuk: "var(--color-masuk)", keluar: "var(--color-keluar)", ink: "var(--color-ink)", grid: "var(--color-line)", axis: "var(--color-line-strong)", muted: "var(--color-muted)", band: "var(--color-paper)" };
 
 function useWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -293,11 +294,11 @@ export function LineChart({ points, height = 232, ariaLabel, name }: { points: {
           {baseline !== null && n > 1 && <path d={`${line}L${x(end).toFixed(1)},${baseline}L${x(0).toFixed(1)},${baseline}Z`} fill={COLORS.ink} opacity={0.07} />}
           {n > 1 && <path d={line} fill="none" stroke={COLORS.ink} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
           {active !== null && <line x1={x(active)} x2={x(active)} y1={m.top} y2={m.top + ih} stroke={COLORS.muted} strokeWidth={1} shapeRendering="crispEdges" />}
-          <circle cx={x(end)} cy={y(points[end].value)} r={4.5} fill={COLORS.ink} stroke="#fff" strokeWidth={2} />
+          <circle cx={x(end)} cy={y(points[end].value)} r={4.5} fill={COLORS.ink} stroke="var(--color-white)" strokeWidth={2} />
           <text x={x(end) + 10} y={y(points[end].value)} dy="0.32em" className="tnum fill-ink text-[12px] font-semibold">
             {rpCompact(points[end].value)}
           </text>
-          {active !== null && active !== end && <circle cx={x(active)} cy={y(points[active].value)} r={4.5} fill={COLORS.ink} stroke="#fff" strokeWidth={2} />}
+          {active !== null && active !== end && <circle cx={x(active)} cy={y(points[active].value)} r={4.5} fill={COLORS.ink} stroke="var(--color-white)" strokeWidth={2} />}
           <rect
             x={m.left - 6}
             y={m.top}

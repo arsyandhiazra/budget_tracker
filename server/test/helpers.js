@@ -87,7 +87,7 @@ export async function startServer({ ai, production = false, fetchImpl } = {}) {
   return {
     get failMailTo() { return api.failMailTo; },
     set failMailTo(v) { api.failMailTo = v; },
-    base, db, config, mails, client, lastCode, signUp, register,
+    app, base, db, config, mails, client, lastCode, signUp, register,
     limiter: app.locals.limiter,
     async close() {
       await new Promise((resolve) => server.close(resolve));

@@ -30,7 +30,59 @@
   --color-bad-fill: #d03b3b;
   --color-bad-soft: #fbe4e2;
 
+  /* Teks berwarna di atas latar lembutnya (lencana, ikon). */
+  --color-masuk-ink: #1c5cab;
+  --color-keluar-ink: #a8431a;
+
+  /* Lapisan gelap di belakang jendela (modal, menu). */
+  --color-scrim: rgb(23 23 22 / 0.4);
+
   --shadow-pop: 0 12px 40px -12px rgb(23 23 22 / 0.28), 0 2px 8px -2px rgb(23 23 22 / 0.08);
+}
+
+/*
+ * Mode gelap: cukup menimpa nilai warna di atas. Seluruh tampilan memakai nama warna itu
+ * (bukan kode warna), jadi semuanya ikut berganti. "white" di sini artinya warna dasar
+ * halaman/kartu, dan "ink" warna teks, sehingga keduanya saling terbalik.
+ * Hanya berlaku di layar; saat dicetak selalu memakai warna terang.
+ * Semua pasangan teks/latar sudah diperiksa kontrasnya (minimal 4,5 : 1).
+ */
+:root {
+  color-scheme: light;
+}
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --color-white: #151514;
+    --color-paper: #1f1f1d;
+    --color-paper-deep: #2a2a27;
+    --color-line: #2c2b28;
+    --color-line-strong: #46453f;
+    --color-ink: #f1f0ea;
+    --color-ink-soft: #d3d1c8;
+    --color-muted: #a5a39a;
+    --color-faint: #8a887f;
+
+    --color-masuk: #5ba4f5;
+    --color-keluar: #f2845a;
+    --color-masuk-soft: #14263b;
+    --color-keluar-soft: #3a2115;
+    --color-masuk-ink: #8bbcf7;
+    --color-keluar-ink: #f6a583;
+
+    --color-good: #6fd07a;
+    --color-good-soft: #14301a;
+    --color-warn: #f0bf4c;
+    --color-warn-fill: #f0bf4c;
+    --color-warn-soft: #33290e;
+    --color-bad: #f58a82;
+    --color-bad-fill: #e5605b;
+    --color-bad-soft: #3b1a18;
+
+    --color-scrim: rgb(0 0 0 / 0.62);
+    --shadow-pop: 0 12px 40px -12px rgb(0 0 0 / 0.7), 0 2px 8px -2px rgb(0 0 0 / 0.5);
+  }
 }
 
 @layer base {
@@ -42,11 +94,11 @@
     font-feature-settings: "ss01";
   }
   ::selection {
-    background: #171716;
-    color: #f4f3ee;
+    background: var(--color-ink);
+    color: var(--color-white);
   }
   :focus-visible {
-    outline: 2px solid #171716;
+    outline: 2px solid var(--color-ink);
     outline-offset: 2px;
   }
   button:not(:disabled),
@@ -59,6 +111,16 @@
   input[type="date"]::-webkit-calendar-picker-indicator {
     cursor: pointer;
     opacity: 0.55;
+  }
+}
+
+/* Panah kecil pada kotak pilihan. Warnanya ikut tema. */
+.select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2366645d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+@media screen {
+  :root[data-theme="dark"] .select-chevron {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a5a39a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   }
 }
 

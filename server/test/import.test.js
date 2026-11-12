@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './helpers.js';
@@ -427,6 +428,48 @@ test('impor 2.000 baris sekaligus selesai wajar dan seluruhnya seimbang', async 
     assert.equal((await c.get('/api/reports/balance-sheet?to=2026-12-31')).data.balanced, true);
     assert.equal((await c.get('/api/reports/trial-balance?to=2026-12-31')).data.balanced, true);
   } finally {
+    await s.close();
+  }
+});
+
+// Di Vercel, isi permintaan bisa sudah dibaca platform (req.body terisi, aliran sudah habis) sebelum Express.
+// Tes ini meniru itu: login (JSON), unggah file (biner), dan batas ukuran tetap berfungsi.
+test('tetap berfungsi kalau platform hosting sudah membaca isi permintaan lebih dulu (gaya Vercel)', async () => {
+  const s = await startServer();
+  const wrapper = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const raw = Buffer.concat(chunks);
+    if (raw.length) {
+      const body = /json/.test(req.headers['content-type'] || '') ? JSON.parse(raw.toString('utf8')) : raw;
+      Object.defineProperty(req, 'body', { value: body, writable: true, configurable: true, enumerable: true });
+    }
+    s.app(req, res);
+  });
+  await new Promise((r) => wrapper.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${wrapper.address().port}`;
+  try {
+    const email = 'vercel-gaya@contoh.test';
+    const H = { 'x-requested-with': 'BudgetTracker' };
+    const json = (path, body, cookie) => fetch(base + path, { method: 'POST', headers: { ...H, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) });
+    assert.equal((await json('/api/auth/register', { name: 'Vercel', email, password: 'rahasia-123' })).status, 201);
+    const verify = await json('/api/auth/verify', { email, code: s.lastCode(email) });
+    assert.equal(verify.status, 200);
+    const cookie = verify.headers.get('set-cookie').split(';')[0];
+    assert.equal((await json('/api/auth/onboarding', { usage: 'usaha', date: '2026-01-01' }, cookie)).status, 200);
+
+    const file = (query, body) => fetch(`${base}/api/import/preview${query}`, { method: 'POST', headers: { ...H, 'content-type': 'application/octet-stream', cookie }, body });
+    const r = await file('', fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'mutasi-xlsxwriter.xlsx')));
+    assert.equal(r.status, 200, await r.clone().text());
+    const data = await r.json();
+    assert.equal(data.summary.total, 6);
+    // Isi permintaan kosong / terlalu besar tetap ditolak rapi.
+    assert.equal((await file('', Buffer.alloc(0))).status, 400);
+    const tooBig = await file('', Buffer.alloc(3.2 * 1024 * 1024, 65));
+    assert.equal(tooBig.status, 413);
+    assert.equal((await tooBig.json()).error.code, 'TOO_LARGE');
+  } finally {
+    await new Promise((r) => wrapper.close(r));
     await s.close();
   }
 });

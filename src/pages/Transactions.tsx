@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api, errorMessage, qs } from "@/lib/api";
+import { useBook, WriteOnly } from "@/lib/book";
 import { fmtDate, rp } from "@/lib/format";
 import { makePeriod } from "@/lib/period";
 import type { Entry } from "@/lib/types";
@@ -18,6 +19,7 @@ type Result = { items: Entry[]; total: number; totals: { income: number; expense
 
 export function TransactionsPage() {
   const { toast, confirm } = useFeedback();
+  const { userId } = useBook();
   const [period, setPeriod] = useState(() => makePeriod("this-month"));
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -90,9 +92,9 @@ export function TransactionsPage() {
   }
 
   const detail = (e: Entry) => {
-    if (e.kind === "transfer") return `${e.cashAccount?.name ?? "?"} → ${e.toAccount?.name ?? "?"}`;
-    if (e.category && e.cashAccount) return `${e.category.name} · ${e.cashAccount.name}`;
-    return e.lines.map((l) => l.name).join(" · ");
+    const base = e.kind === "transfer" ? `${e.cashAccount?.name ?? "?"} → ${e.toAccount?.name ?? "?"}` : e.category && e.cashAccount ? `${e.category.name} · ${e.cashAccount.name}` : e.lines.map((l) => l.name).join(" · ");
+    // Di pembukuan yang dipakai bersama: tampilkan siapa yang mencatat, kalau bukan kamu sendiri.
+    return e.createdBy && e.createdBy.id !== userId ? `${base} · dicatat ${e.createdBy.name}` : base;
   };
 
   const actions = (e: Entry) => {
@@ -106,18 +108,20 @@ export function TransactionsPage() {
     }
     return (
       <span className="inline-flex gap-1">
-        {SIMPLE.includes(e.kind) ? (
-          <Button variant="ghost" size="icon" aria-label={`Ubah ${e.description}`} title="Ubah" onClick={() => setForm({ open: true, edit: e })}>
-            <Pencil className="h-4 w-4" aria-hidden />
+        <WriteOnly>
+          {SIMPLE.includes(e.kind) ? (
+            <Button variant="ghost" size="icon" aria-label={`Ubah ${e.description}`} title="Ubah" onClick={() => setForm({ open: true, edit: e })}>
+              <Pencil className="h-4 w-4" aria-hidden />
+            </Button>
+          ) : (
+            <a href="#/jurnal" title="Ubah di Jurnal Umum" aria-label={`Ubah ${e.description} di Jurnal Umum`} className="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-paper">
+              <Pencil className="h-4 w-4" aria-hidden />
+            </a>
+          )}
+          <Button variant="ghost" size="icon" aria-label={`Hapus ${e.description}`} title="Hapus" onClick={() => remove(e)}>
+            <Trash2 className="h-4 w-4" aria-hidden />
           </Button>
-        ) : (
-          <a href="#/jurnal" title="Ubah di Jurnal Umum" aria-label={`Ubah ${e.description} di Jurnal Umum`} className="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-paper">
-            <Pencil className="h-4 w-4" aria-hidden />
-          </a>
-        )}
-        <Button variant="ghost" size="icon" aria-label={`Hapus ${e.description}`} title="Hapus" onClick={() => remove(e)}>
-          <Trash2 className="h-4 w-4" aria-hidden />
-        </Button>
+        </WriteOnly>
       </span>
     );
   };
@@ -126,9 +130,11 @@ export function TransactionsPage() {
     <Page>
       <PageHeader title="Transaksi" description="Semua catatan uang masuk, uang keluar, dan perpindahan antar dompet.">
         <PeriodPicker value={period} onChange={setPeriod} />
-        <Button onClick={() => setForm({ open: true, edit: null })}>
-          <Plus className="h-4 w-4" aria-hidden /> Tambah transaksi
-        </Button>
+        <WriteOnly>
+          <Button onClick={() => setForm({ open: true, edit: null })}>
+            <Plus className="h-4 w-4" aria-hidden /> Tambah transaksi
+          </Button>
+        </WriteOnly>
       </PageHeader>
 
       <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">

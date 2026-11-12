@@ -81,12 +81,11 @@ export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputEleme
 
 export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select className={cn(inputClass, "appearance-none bg-[length:16px] bg-[right_0.75rem_center] bg-no-repeat pr-9", className)} style={{ backgroundImage: CHEVRON }} {...rest}>
+    <select className={cn(inputClass, "select-chevron appearance-none bg-[length:16px] bg-[right_0.75rem_center] bg-no-repeat pr-9", className)} {...rest}>
       {children}
     </select>
   );
 }
-const CHEVRON = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2366645d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`;
 
 /** Isian uang: otomatis diberi titik pemisah ribuan saat diketik. */
 export function MoneyInput({ value, onChange, id, placeholder = "0", autoFocus, className, onBlur, onEnter, ariaLabel }: {
@@ -154,8 +153,8 @@ export function Card({ className, children }: { className?: string; children: Re
 
 const BADGE = {
   neutral: "bg-paper text-ink-soft",
-  masuk: "bg-masuk-soft text-[#1c5cab]",
-  keluar: "bg-keluar-soft text-[#a8431a]",
+  masuk: "bg-masuk-soft text-masuk-ink",
+  keluar: "bg-keluar-soft text-keluar-ink",
   good: "bg-good-soft text-good",
   warn: "bg-warn-soft text-warn",
   bad: "bg-bad-soft text-bad",
@@ -272,7 +271,7 @@ export function Modal({ open, onClose, title, description, children, footer, wid
 
   return (
     <div className="no-print fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6" onKeyDown={onKeyDown}>
-      <div className="animate-fade absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden />
+      <div className="animate-fade absolute inset-0 bg-scrim" onClick={onClose} aria-hidden />
       <div
         ref={panel}
         role="dialog"

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ArrowRight, Plus } from "lucide-react";
 import { qs, useData } from "@/lib/api";
+import { WriteOnly } from "@/lib/book";
 import { fmtDate, fmtMonth, monthShort, rp, today } from "@/lib/format";
 import { makePeriod } from "@/lib/period";
 import type { Dashboard, User } from "@/lib/types";
@@ -40,9 +41,11 @@ export function DashboardPage({ user }: { user: User }) {
                     </div>
                     <div className="no-print flex flex-wrap items-center gap-2">
                       <PeriodPicker value={period} onChange={setPeriod} />
-                      <Button onClick={() => setAdding(true)}>
-                        <Plus className="h-4 w-4" aria-hidden /> Tambah transaksi
-                      </Button>
+                      <WriteOnly>
+                        <Button onClick={() => setAdding(true)}>
+                          <Plus className="h-4 w-4" aria-hidden /> Tambah transaksi
+                        </Button>
+                      </WriteOnly>
                     </div>
                   </header>
 
@@ -107,9 +110,11 @@ export function DashboardPage({ user }: { user: User }) {
                 {!d.hasData && (
                   <Card className="lg:col-span-2">
                     <Empty title="Belum ada catatan" text="Mulai dengan mencatat satu pemasukan atau pengeluaran. Grafik dan laporan akan terisi sendiri.">
-                      <Button onClick={() => setAdding(true)}>
-                        <Plus className="h-4 w-4" aria-hidden /> Catat transaksi pertama
-                      </Button>
+                      <WriteOnly>
+                        <Button onClick={() => setAdding(true)}>
+                          <Plus className="h-4 w-4" aria-hidden /> Catat transaksi pertama
+                        </Button>
+                      </WriteOnly>
                     </Empty>
                   </Card>
                 )}
