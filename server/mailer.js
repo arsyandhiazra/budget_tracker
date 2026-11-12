@@ -4,6 +4,16 @@ import nodemailer from 'nodemailer';
 
 export function createMailer(config) {
   const { smtp } = config;
+  if (!smtp.host && config.production) {
+    // Di production, kode verifikasi tidak boleh ditulis ke log server. Lebih baik gagal
+    // dengan jelas daripada pengguna menunggu email yang tidak pernah datang.
+    return {
+      configured: false,
+      async send() {
+        throw new Error('SMTP belum diatur di server (isi SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM).');
+      },
+    };
+  }
   if (!smtp.host) {
     return {
       configured: false,

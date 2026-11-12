@@ -14,13 +14,13 @@ export function createChat({ db, config, limiter, fetchImpl }) {
   const router = express.Router();
   const status = () => ({ mode: config.ai.enabled ? 'ai' : 'basic', provider: config.ai.enabled ? config.ai.provider : null });
 
-  router.get('/chat', (req, res) => {
-    const rows = db.all('SELECT id, role, content, mode, created_at AS createdAt FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT 50', req.user.id);
+  router.get('/chat', async (req, res) => {
+    const rows = await db.all('SELECT id, role, content, mode, created_at AS "createdAt" FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT 50', req.user.id);
     res.json({ messages: rows.reverse(), ...status() });
   });
 
-  router.delete('/chat', (req, res) => {
-    db.run('DELETE FROM chat_messages WHERE user_id = ?', req.user.id);
+  router.delete('/chat', async (req, res) => {
+    await db.run('DELETE FROM chat_messages WHERE user_id = ?', req.user.id);
     res.json({ ok: true });
   });
 
@@ -30,13 +30,13 @@ export function createChat({ db, config, limiter, fetchImpl }) {
     const today = /^\d{4}-\d{2}-\d{2}$/.test(req.body.today || '') ? v.date(req.body.today) : todayIn(config.timezone);
 
     for (const [key, max, windowMs] of [[`chat:${userId}`, 15, 60_000], [`chat-day:${userId}`, 300, 24 * 60 * 60_000]]) {
-      const r = limiter.hit(key, max, windowMs);
+      const r = await limiter.hit(key, max, windowMs);
       if (!r.ok) throw new HttpError(429, 'Kamu mengirim pesan terlalu cepat. Tunggu sebentar ya.', 'RATE_LIMITED', { retryAfter: r.retryAfter });
     }
 
-    const ctx = buildContext(db, req.user, today);
-    const history = db.all('SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT ?', userId, HISTORY_FOR_AI).reverse();
-    db.run('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?,?,?,?)', userId, 'user', message, nowIso());
+    const ctx = await buildContext(db, req.user, today);
+    const history = (await db.all('SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT ?', userId, HISTORY_FOR_AI)).reverse();
+    await db.run('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?,?,?,?)', userId, 'user', message, nowIso());
 
     let reply;
     let mode = 'basic';
@@ -54,9 +54,9 @@ export function createChat({ db, config, limiter, fetchImpl }) {
     }
     reply ??= basicAnswer(message, ctx);
 
-    const r = db.run('INSERT INTO chat_messages (user_id, role, content, mode, created_at) VALUES (?,?,?,?,?)', userId, 'assistant', reply, mode, nowIso());
-    db.run('DELETE FROM chat_messages WHERE user_id = ? AND id <= (SELECT id FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)', userId, userId, KEEP_MESSAGES);
-    res.json({ id: Number(r.lastInsertRowid), reply, mode, notice });
+    const replyId = await db.insert('INSERT INTO chat_messages (user_id, role, content, mode, created_at) VALUES (?,?,?,?,?)', userId, 'assistant', reply, mode, nowIso());
+    await db.run('DELETE FROM chat_messages WHERE user_id = ? AND id <= (SELECT id FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)', userId, userId, KEEP_MESSAGES);
+    res.json({ id: replyId, reply, mode, notice });
   });
 
   return router;

@@ -16,12 +16,12 @@ function sameDay(ym, dd) {
   return candidate > end ? end : candidate;
 }
 
-function totals(db, userId, from, to) {
+async function totals(db, userId, from, to) {
   let income = 0;
   let expense = 0;
   const expenses = [];
   const incomes = [];
-  for (const r of acc.sums(db, userId, { from, to })) {
+  for (const r of await acc.sums(db, userId, { from, to })) {
     if (r.type === 'income') {
       const amount = r.c - r.d;
       income += amount;
@@ -37,15 +37,15 @@ function totals(db, userId, from, to) {
   return { from, to, income, expense, net: income - expense, expenses, incomes };
 }
 
-export function buildContext(db, user, today) {
+export async function buildContext(db, user, today) {
   const ym = today.slice(0, 7);
   const prev = monthAdd(ym, -1);
-  const wallets = acc.sums(db, user.id, { to: today })
+  const wallets = (await acc.sums(db, user.id, { to: today }))
     .filter((r) => r.type === 'asset' && r.subtype === 'cash' && (!r.archived || r.d !== r.c))
     .map((r) => ({ name: r.name, balance: r.d - r.c }));
-  const budget = acc.budgetStatus(db, user.id, ym);
-  const debts = acc.listDebts(db, user.id, { today, status: 'open' });
-  const recent = acc.listEntries(db, user.id, { to: today, limit: 12 }).items;
+  const budget = await acc.budgetStatus(db, user.id, ym);
+  const debts = await acc.listDebts(db, user.id, { today, status: 'open' });
+  const recent = (await acc.listEntries(db, user.id, { to: today, limit: 12 })).items;
 
   return {
     today,
@@ -54,14 +54,14 @@ export function buildContext(db, user, today) {
     usage: user.usage,
     wallets,
     cashTotal: wallets.reduce((s, w) => s + w.balance, 0),
-    todayTotals: totals(db, user.id, today, today),
-    week: totals(db, user.id, dayAdd(today, -6), today),
-    month: totals(db, user.id, `${ym}-01`, today),
-    lastMonth: totals(db, user.id, `${prev}-01`, `${prev}-31`),
+    todayTotals: await totals(db, user.id, today, today),
+    week: await totals(db, user.id, dayAdd(today, -6), today),
+    month: await totals(db, user.id, `${ym}-01`, today),
+    lastMonth: await totals(db, user.id, `${prev}-01`, `${prev}-31`),
     // Pembanding yang adil untuk bulan berjalan: bulan lalu sampai tanggal yang sama
     // (mis. 1–12 Nov dibandingkan 1–12 Okt, bukan Oktober penuh).
-    lastMonthToDate: totals(db, user.id, `${prev}-01`, sameDay(prev, today.slice(8, 10))),
-    year: totals(db, user.id, `${today.slice(0, 4)}-01-01`, today),
+    lastMonthToDate: await totals(db, user.id, `${prev}-01`, sameDay(prev, today.slice(8, 10))),
+    year: await totals(db, user.id, `${today.slice(0, 4)}-01-01`, today),
     budgets: budget.items.filter((b) => b.budget > 0).map((b) => ({ name: b.name, budget: b.budget, spent: b.spent })),
     debts: {
       payable: debts.filter((d) => d.kind === 'payable'),

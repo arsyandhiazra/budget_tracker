@@ -123,9 +123,9 @@ test('lupa kata sandi, ganti kata sandi, dan hapus akun', async () => {
     assert.equal(r.status, 400);
     r = await c.del('/api/auth/account', { password: 'sandi-ketiga-3' });
     assert.equal(r.status, 200);
-    assert.equal(s.db.get('SELECT COUNT(*) AS n FROM users').n, 0);
-    assert.equal(s.db.get('SELECT COUNT(*) AS n FROM accounts').n, 0);
-    assert.equal(s.db.get('SELECT COUNT(*) AS n FROM lines').n, 0);
+    assert.equal((await s.db.get('SELECT COUNT(*) AS n FROM users')).n, 0);
+    assert.equal((await s.db.get('SELECT COUNT(*) AS n FROM accounts')).n, 0);
+    assert.equal((await s.db.get('SELECT COUNT(*) AS n FROM lines')).n, 0);
   } finally {
     await s.close();
   }
@@ -163,14 +163,14 @@ test('pengaman: CSRF, batas percobaan login, kode kedaluwarsa & terkunci', async
 
     // Minta kode baru terlalu cepat ditolak; setelah jeda, kode baru berlaku.
     assert.equal((await c2.post('/api/auth/resend', { email: email2 })).status, 429);
-    s.db.run("UPDATE email_codes SET created_at = '2020-01-01T00:00:00.000Z'");
+    await s.db.run("UPDATE email_codes SET created_at = '2020-01-01T00:00:00.000Z'");
     assert.equal((await c2.post('/api/auth/resend', { email: email2 })).status, 200);
     const fresh = s.lastCode(email2);
-    s.db.run("UPDATE email_codes SET expires_at = '2020-01-01T00:00:00.000Z' WHERE used_at IS NULL");
+    await s.db.run("UPDATE email_codes SET expires_at = '2020-01-01T00:00:00.000Z' WHERE used_at IS NULL");
     assert.equal((await c2.post('/api/auth/verify', { email: email2, code: fresh })).data.error.code, 'CODE_EXPIRED');
 
     // Kata sandi tidak tersimpan apa adanya.
-    const row = s.db.get('SELECT password_hash FROM users WHERE email = ?', email);
+    const row = await s.db.get('SELECT password_hash FROM users WHERE email = ?', email);
     assert.match(row.password_hash, /^scrypt\$/);
     assert.ok(!row.password_hash.includes('rahasia-123'));
   } finally {
@@ -180,13 +180,13 @@ test('pengaman: CSRF, batas percobaan login, kode kedaluwarsa & terkunci', async
 
 test('mode percobaan: tanpa SMTP kode dikembalikan, tapi tidak pernah di production', async () => {
   const { loadConfig } = await import('../config.js');
-  const { openDb } = await import('../db.js');
   const { createApp } = await import('../app.js');
   const { createMailer } = await import('../mailer.js');
+  const { testDb } = await import('./helpers.js');
   for (const production of [false, true]) {
     const config = loadConfig({ skipEnvFile: true, quiet: true, env: { NODE_ENV: production ? 'production' : 'development', SMTP_HOST: '', AI_PROVIDER: '' } });
     config.distDir = '/nonexistent';
-    const db = openDb(':memory:');
+    const db = await testDb();
     const mailer = createMailer(config);
     const log = console.log;
     console.log = () => {};
@@ -203,9 +203,8 @@ test('mode percobaan: tanpa SMTP kode dikembalikan, tapi tidak pernah di product
       else assert.match(data.devCode, /^\d{6}$/);
     } finally {
       console.log = log;
-      app.locals.limiter.stop();
       await new Promise((resolve) => server.close(resolve));
-      db.close();
+      await db.close();
     }
   }
 });

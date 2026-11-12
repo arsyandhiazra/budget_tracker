@@ -51,43 +51,31 @@ export function safeEqual(a, b) {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
 
-// Pembatas percobaan sederhana yang disimpan di memori server.
+// Pembatas percobaan (rate limit). Catatannya disimpan di database, bukan di memori,
+// supaya tetap berlaku di hosting serverless (Vercel) yang menyalakan banyak server
+// sementara dan mematikannya lagi.
 export class RateLimiter {
-  constructor() {
-    this.hits = new Map();
-    this.timer = setInterval(() => this.cleanup(), 60_000);
-    this.timer.unref();
+  constructor(db) {
+    this.db = db;
   }
 
   // Mengembalikan { ok, retryAfter } — retryAfter dalam detik.
-  hit(key, limit, windowMs) {
+  async hit(key, limit, windowMs) {
     const now = Date.now();
-    const list = (this.hits.get(key) || []).filter((t) => now - t < windowMs);
-    if (list.length >= limit) {
-      this.hits.set(key, list);
-      return { ok: false, retryAfter: Math.max(1, Math.ceil((windowMs - (now - list[0])) / 1000)) };
-    }
-    list.push(now);
-    this.hits.set(key, list);
+    const cutoff = now - windowMs;
+    const { n, oldest } = await this.db.get('SELECT COUNT(*) AS n, MIN(hit_at) AS oldest FROM rate_limits WHERE key = ? AND hit_at > ?', key, cutoff);
+    if (n >= limit) return { ok: false, retryAfter: Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000)) };
+    await this.db.run('INSERT INTO rate_limits (key, hit_at) VALUES (?, ?)', key, now);
+    // Sesekali bersihkan catatan lama (lebih dari 1 hari).
+    if (Math.random() < 0.02) await this.db.run('DELETE FROM rate_limits WHERE hit_at < ?', now - 24 * 60 * 60_000);
     return { ok: true, retryAfter: 0 };
   }
 
-  reset(key) {
-    this.hits.delete(key);
+  async reset(key) {
+    await this.db.run('DELETE FROM rate_limits WHERE key = ?', key);
   }
 
-  cleanup() {
-    const now = Date.now();
-    for (const [key, list] of this.hits) {
-      const fresh = list.filter((t) => now - t < 60 * 60_000);
-      if (fresh.length) this.hits.set(key, fresh);
-      else this.hits.delete(key);
-    }
-  }
-
-  stop() {
-    clearInterval(this.timer);
-  }
+  stop() {}
 }
 
 export function parseCookies(header) {

@@ -69,31 +69,31 @@ const TEMPLATES = {
   ],
 };
 
-export function seedAccounts(db, userId, usage) {
+export async function seedAccounts(db, userId, usage) {
   const rows = [...BASE_ACCOUNTS, ...(TEMPLATES[usage] || TEMPLATES.pribadi)];
   const now = nowIso();
   for (const [code, name, type, subtype, role] of rows) {
-    db.run(
-      'INSERT OR IGNORE INTO accounts (user_id, code, name, type, subtype, role, created_at) VALUES (?,?,?,?,?,?,?)',
+    await db.run(
+      'INSERT INTO accounts (user_id, code, name, type, subtype, role, created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT DO NOTHING',
       userId, code, name, type, subtype, role, now,
     );
   }
 }
 
-export function roleAccount(db, userId, role) {
-  const acc = db.get('SELECT * FROM accounts WHERE user_id = ? AND role = ?', userId, role);
+export async function roleAccount(db, userId, role) {
+  const acc = await db.get('SELECT * FROM accounts WHERE user_id = ? AND role = ?', userId, role);
   if (!acc) throw bad('Akun bawaan belum tersedia. Selesaikan pengaturan awal dulu.', 'ONBOARDING_REQUIRED');
   return acc;
 }
 
-export function getAccount(db, userId, id, label = 'Akun') {
-  const acc = db.get('SELECT * FROM accounts WHERE id = ? AND user_id = ?', v.id(id, label), userId);
+export async function getAccount(db, userId, id, label = 'Akun') {
+  const acc = await db.get('SELECT * FROM accounts WHERE id = ? AND user_id = ?', v.id(id, label), userId);
   if (!acc) throw bad(`${label} tidak ditemukan.`);
   return acc;
 }
 
-function usableAccount(db, userId, id, label, check) {
-  const acc = getAccount(db, userId, id, label);
+async function usableAccount(db, userId, id, label, check) {
+  const acc = await getAccount(db, userId, id, label);
   if (acc.archived) throw bad(`${label} "${acc.name}" sudah diarsipkan.`);
   if (check && !check(acc)) throw bad(`${label} yang dipilih tidak sesuai.`);
   return acc;
@@ -101,13 +101,13 @@ function usableAccount(db, userId, id, label, check) {
 
 // Jumlah debit & kredit tiap akun pada rentang tanggal tertentu.
 // opts: { from, to, before } — "before" berarti sebelum tanggal itu (tidak termasuk).
-export function sums(db, userId, opts = {}) {
+export async function sums(db, userId, opts = {}) {
   const cond = ['e.user_id = ?'];
   const params = [userId];
   if (opts.from) { cond.push('e.date >= ?'); params.push(opts.from); }
   if (opts.to) { cond.push('e.date <= ?'); params.push(opts.to); }
   if (opts.before) { cond.push('e.date < ?'); params.push(opts.before); }
-  return db.all(
+  return await db.all(
     `SELECT a.id, a.code, a.name, a.type, a.subtype, a.role, a.archived,
             COALESCE(s.d, 0) AS d, COALESCE(s.c, 0) AS c
      FROM accounts a
@@ -135,41 +135,40 @@ function netIncome(rows) {
 
 // ───────────────────────────── Akun ─────────────────────────────
 
-export function listAccounts(db, userId) {
-  const used = new Set(db.all('SELECT DISTINCT l.account_id AS id FROM lines l JOIN accounts a ON a.id = l.account_id WHERE a.user_id = ?', userId).map((r) => r.id));
-  return sums(db, userId).map((r) => ({
+export async function listAccounts(db, userId) {
+  const used = new Set((await db.all('SELECT DISTINCT l.account_id AS id FROM lines l JOIN accounts a ON a.id = l.account_id WHERE a.user_id = ?', userId)).map((r) => r.id));
+  return (await sums(db, userId)).map((r) => ({
     id: r.id, code: r.code, name: r.name, type: r.type, subtype: r.subtype,
     system: Boolean(r.role), archived: Boolean(r.archived), used: used.has(r.id),
     balance: balanceOf(r, r.d, r.c),
   }));
 }
 
-function nextCode(db, userId, type) {
+async function nextCode(db, userId, type) {
   const prefix = CODE_PREFIX[type];
-  const row = db.get('SELECT MAX(CAST(code AS INTEGER)) AS m FROM accounts WHERE user_id = ? AND code LIKE ? AND code GLOB ?', userId, `${prefix}%`, '[0-9][0-9][0-9][0-9]');
+  const row = await db.get("SELECT MAX(CASE WHEN code ~ '^[0-9]{4}$' THEN CAST(code AS INTEGER) END) AS m FROM accounts WHERE user_id = ? AND code LIKE ?", userId, `${prefix}%`);
   const base = Number(`${prefix}900`);
   return String(Math.max(Number(row?.m) || 0, base) + 1);
 }
 
-export function createAccount(db, userId, body) {
+export async function createAccount(db, userId, body) {
   const name = v.str(body.name, 'Nama akun', { max: 80 });
   const type = v.oneOf(body.type, TYPES, 'Tipe akun');
   const subtype = body.subtype ? v.oneOf(body.subtype, SUBTYPES[type], 'Jenis akun') : SUBTYPES[type][type === 'expense' ? 1 : 0];
   let code = v.str(body.code, 'Kode akun', { max: 12, optional: true });
   if (code && !/^[0-9A-Za-z.-]+$/.test(code)) throw bad('Kode akun hanya boleh huruf, angka, titik, atau strip.');
-  code ||= nextCode(db, userId, type);
-  if (db.get('SELECT 1 AS x FROM accounts WHERE user_id = ? AND code = ?', userId, code)) throw bad(`Kode akun ${code} sudah dipakai.`);
-  if (db.get('SELECT 1 AS x FROM accounts WHERE user_id = ? AND name = ? COLLATE NOCASE AND type = ?', userId, name, type)) throw bad(`Akun bernama "${name}" sudah ada.`);
-  const r = db.run('INSERT INTO accounts (user_id, code, name, type, subtype, created_at) VALUES (?,?,?,?,?,?)', userId, code, name, type, subtype, nowIso());
-  return Number(r.lastInsertRowid);
+  code ||= await nextCode(db, userId, type);
+  if (await db.get('SELECT 1 AS x FROM accounts WHERE user_id = ? AND code = ?', userId, code)) throw bad(`Kode akun ${code} sudah dipakai.`);
+  if (await db.get('SELECT 1 AS x FROM accounts WHERE user_id = ? AND lower(name) = lower(?) AND type = ?', userId, name, type)) throw bad(`Akun bernama "${name}" sudah ada.`);
+  return db.insert('INSERT INTO accounts (user_id, code, name, type, subtype, created_at) VALUES (?,?,?,?,?,?)', userId, code, name, type, subtype, nowIso());
 }
 
-export function updateAccount(db, userId, id, body) {
-  const acc = getAccount(db, userId, id);
+export async function updateAccount(db, userId, id, body) {
+  const acc = await getAccount(db, userId, id);
   const name = body.name !== undefined ? v.str(body.name, 'Nama akun', { max: 80 }) : acc.name;
   let code = body.code !== undefined ? v.str(body.code, 'Kode akun', { max: 12 }) : acc.code;
   if (!/^[0-9A-Za-z.-]+$/.test(code)) throw bad('Kode akun hanya boleh huruf, angka, titik, atau strip.');
-  if (code !== acc.code && db.get('SELECT 1 AS x FROM accounts WHERE user_id = ? AND code = ? AND id != ?', userId, code, acc.id)) throw bad(`Kode akun ${code} sudah dipakai.`);
+  if (code !== acc.code && await db.get('SELECT 1 AS x FROM accounts WHERE user_id = ? AND code = ? AND id != ?', userId, code, acc.id)) throw bad(`Kode akun ${code} sudah dipakai.`);
   let subtype = acc.subtype;
   if (body.subtype !== undefined && body.subtype !== acc.subtype) {
     if (acc.role) throw bad('Jenis akun bawaan tidak bisa diubah.');
@@ -180,28 +179,28 @@ export function updateAccount(db, userId, id, body) {
     archived = body.archived ? 1 : 0;
     if (archived && acc.role) throw bad('Akun bawaan tidak bisa diarsipkan.');
   }
-  db.run('UPDATE accounts SET name = ?, code = ?, subtype = ?, archived = ? WHERE id = ?', name, code, subtype, archived, acc.id);
+  await db.run('UPDATE accounts SET name = ?, code = ?, subtype = ?, archived = ? WHERE id = ?', name, code, subtype, archived, acc.id);
 }
 
-export function deleteAccount(db, userId, id) {
-  const acc = getAccount(db, userId, id);
+export async function deleteAccount(db, userId, id) {
+  const acc = await getAccount(db, userId, id);
   if (acc.role) throw bad('Akun bawaan tidak bisa dihapus.');
-  if (db.get('SELECT 1 AS x FROM lines WHERE account_id = ? LIMIT 1', acc.id)) {
+  if (await db.get('SELECT 1 AS x FROM lines WHERE account_id = ? LIMIT 1', acc.id)) {
     throw bad('Akun ini sudah dipakai di transaksi, jadi tidak bisa dihapus. Kamu bisa mengarsipkannya.');
   }
-  db.run('DELETE FROM accounts WHERE id = ?', acc.id);
+  await db.run('DELETE FROM accounts WHERE id = ?', acc.id);
 }
 
 // ───────────────────────────── Jurnal ─────────────────────────────
 
-function cleanLines(db, userId, lines) {
+async function cleanLines(db, userId, lines) {
   if (!Array.isArray(lines) || lines.length < 2) throw bad('Jurnal butuh minimal dua baris.');
   if (lines.length > 40) throw bad('Jurnal maksimal 40 baris.');
   let totalDebit = 0;
   let totalCredit = 0;
   const out = [];
   for (const line of lines) {
-    const acc = usableAccount(db, userId, line?.accountId, 'Akun');
+    const acc = await usableAccount(db, userId, line?.accountId, 'Akun');
     const debit = v.amount(line.debit ?? 0, 'Debit', { allowZero: true });
     const credit = v.amount(line.credit ?? 0, 'Kredit', { allowZero: true });
     if ((debit > 0) === (credit > 0)) throw bad('Setiap baris diisi salah satu saja: debit atau kredit.');
@@ -213,61 +212,60 @@ function cleanLines(db, userId, lines) {
   return { lines: out, amount: totalDebit };
 }
 
-function checkContact(db, userId, contactId) {
+async function checkContact(db, userId, contactId) {
   if (contactId === undefined || contactId === null || contactId === '') return null;
-  const row = db.get('SELECT id FROM contacts WHERE id = ? AND user_id = ?', v.id(contactId, 'Kontak'), userId);
+  const row = await db.get('SELECT id FROM contacts WHERE id = ? AND user_id = ?', v.id(contactId, 'Kontak'), userId);
   if (!row) throw bad('Kontak tidak ditemukan.');
   return row.id;
 }
 
-export function createEntry(db, userId, { date, description, kind, contactId, lines }) {
+export async function createEntry(db, userId, { date, description, kind, contactId, lines }) {
   const d = v.date(date);
   const desc = v.str(description, 'Keterangan', { max: 200 });
-  const clean = cleanLines(db, userId, lines);
-  const contact = checkContact(db, userId, contactId);
-  return db.tx(() => {
-    const r = db.run(
+  const clean = await cleanLines(db, userId, lines);
+  const contact = await checkContact(db, userId, contactId);
+  return await db.tx(async () => {
+    const id = await db.insert(
       'INSERT INTO entries (user_id, date, description, kind, amount, contact_id, created_at) VALUES (?,?,?,?,?,?,?)',
       userId, d, desc, kind, clean.amount, contact, nowIso(),
     );
-    const id = Number(r.lastInsertRowid);
-    clean.lines.forEach((l, i) => db.run('INSERT INTO lines (entry_id, account_id, debit, credit, position) VALUES (?,?,?,?,?)', id, l.accountId, l.debit, l.credit, i));
+    for (const [i, l] of clean.lines.entries()) await db.run('INSERT INTO lines (entry_id, account_id, debit, credit, position) VALUES (?,?,?,?,?)', id, l.accountId, l.debit, l.credit, i);
     return id;
   });
 }
 
-export function getEntry(db, userId, id) {
-  const entry = db.get('SELECT * FROM entries WHERE id = ? AND user_id = ?', v.id(id), userId);
+export async function getEntry(db, userId, id) {
+  const entry = await db.get('SELECT * FROM entries WHERE id = ? AND user_id = ?', v.id(id), userId);
   if (!entry) throw notFound('Transaksi tidak ditemukan.');
   return entry;
 }
 
-export function updateEntry(db, userId, id, { date, description, contactId, lines }, allowedKinds) {
-  const entry = getEntry(db, userId, id);
+export async function updateEntry(db, userId, id, { date, description, contactId, lines }, allowedKinds) {
+  const entry = await getEntry(db, userId, id);
   if (!allowedKinds.includes(entry.kind)) throw bad('Transaksi ini tidak bisa diubah dari sini.');
   const d = v.date(date);
   const desc = v.str(description, 'Keterangan', { max: 200 });
-  const clean = cleanLines(db, userId, lines);
-  const contact = checkContact(db, userId, contactId);
-  db.tx(() => {
-    db.run('UPDATE entries SET date = ?, description = ?, amount = ?, contact_id = ? WHERE id = ?', d, desc, clean.amount, contact, entry.id);
-    db.run('DELETE FROM lines WHERE entry_id = ?', entry.id);
-    clean.lines.forEach((l, i) => db.run('INSERT INTO lines (entry_id, account_id, debit, credit, position) VALUES (?,?,?,?,?)', entry.id, l.accountId, l.debit, l.credit, i));
+  const clean = await cleanLines(db, userId, lines);
+  const contact = await checkContact(db, userId, contactId);
+  await db.tx(async () => {
+    await db.run('UPDATE entries SET date = ?, description = ?, amount = ?, contact_id = ? WHERE id = ?', d, desc, clean.amount, contact, entry.id);
+    await db.run('DELETE FROM lines WHERE entry_id = ?', entry.id);
+    for (const [i, l] of clean.lines.entries()) await db.run('INSERT INTO lines (entry_id, account_id, debit, credit, position) VALUES (?,?,?,?,?)', entry.id, l.accountId, l.debit, l.credit, i);
   });
 }
 
-export function deleteEntry(db, userId, id) {
-  const entry = getEntry(db, userId, id);
+export async function deleteEntry(db, userId, id) {
+  const entry = await getEntry(db, userId, id);
   if (entry.kind === 'debt' || entry.kind === 'debt_payment') {
     throw bad('Catatan ini terhubung ke utang/piutang. Hapus lewat menu Utang & Piutang.');
   }
-  db.run('DELETE FROM entries WHERE id = ?', entry.id);
+  await db.run('DELETE FROM entries WHERE id = ?', entry.id);
 }
 
-function attachLines(db, entries) {
+async function attachLines(db, entries) {
   if (!entries.length) return [];
   const ids = entries.map((e) => e.id);
-  const rows = db.all(
+  const rows = await db.all(
     `SELECT l.entry_id, l.account_id, l.debit, l.credit, a.code, a.name, a.type, a.subtype
      FROM lines l JOIN accounts a ON a.id = l.account_id
      WHERE l.entry_id IN (${ids.map(() => '?').join(',')})
@@ -297,7 +295,7 @@ function attachLines(db, entries) {
   });
 }
 
-export function listEntries(db, userId, { from, to, kinds, accountId, contactId, q, limit = 50, offset = 0, order = 'DESC' } = {}) {
+export async function listEntries(db, userId, { from, to, kinds, accountId, contactId, q, limit = 50, offset = 0, order = 'DESC' } = {}) {
   const cond = ['e.user_id = ?'];
   const params = [userId];
   if (from) { cond.push('e.date >= ?'); params.push(from); }
@@ -305,22 +303,22 @@ export function listEntries(db, userId, { from, to, kinds, accountId, contactId,
   if (kinds?.length) { cond.push(`e.kind IN (${kinds.map(() => '?').join(',')})`); params.push(...kinds); }
   if (accountId) { cond.push('EXISTS (SELECT 1 FROM lines l WHERE l.entry_id = e.id AND l.account_id = ?)'); params.push(accountId); }
   if (contactId) { cond.push('e.contact_id = ?'); params.push(contactId); }
-  if (q) { cond.push("e.description LIKE ? ESCAPE '\\'"); params.push(`%${q.replace(/[\\%_]/g, '\\$&')}%`); }
+  if (q) { cond.push("e.description ILIKE ? ESCAPE '\\'"); params.push(`%${q.replace(/[\\%_]/g, '\\$&')}%`); }
   const where = cond.join(' AND ');
   const dir = order === 'ASC' ? 'ASC' : 'DESC';
-  const total = db.get(`SELECT COUNT(*) AS n FROM entries e WHERE ${where}`, ...params).n;
-  const rows = db.all(
+  const total = (await db.get(`SELECT COUNT(*) AS n FROM entries e WHERE ${where}`, ...params)).n;
+  const rows = await db.all(
     `SELECT e.*, c.name AS contact_name FROM entries e LEFT JOIN contacts c ON c.id = e.contact_id
      WHERE ${where} ORDER BY e.date ${dir}, e.id ${dir} LIMIT ? OFFSET ?`,
     ...params, limit, offset,
   );
-  const totals = db.get(
+  const totals = await db.get(
     `SELECT COALESCE(SUM(CASE WHEN e.kind = 'income' THEN e.amount END), 0) AS income,
             COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount END), 0) AS expense
      FROM entries e WHERE ${where}`,
     ...params,
   );
-  return { items: attachLines(db, rows), total, totals };
+  return { items: await attachLines(db, rows), total, totals };
 }
 
 // ─────────────────── Transaksi sederhana → baris jurnal ───────────────────
@@ -328,37 +326,37 @@ export function listEntries(db, userId, { from, to, kinds, accountId, contactId,
 export const SIMPLE_KINDS = ['income', 'expense', 'transfer', 'capital_in', 'drawing'];
 const isCash = (a) => a.type === 'asset' && a.subtype === 'cash';
 
-export function simpleLines(db, userId, t) {
+export async function simpleLines(db, userId, t) {
   const kind = v.oneOf(t.kind, SIMPLE_KINDS, 'Jenis transaksi');
   const amount = v.amount(t.amount);
-  const cash = usableAccount(db, userId, t.cashAccountId, kind === 'transfer' ? 'Dompet asal' : 'Dompet', isCash);
+  const cash = await usableAccount(db, userId, t.cashAccountId, kind === 'transfer' ? 'Dompet asal' : 'Dompet', isCash);
   const dr = (acc) => ({ accountId: acc.id, debit: amount, credit: 0 });
   const cr = (acc) => ({ accountId: acc.id, debit: 0, credit: amount });
   switch (kind) {
     case 'income': {
-      const cat = usableAccount(db, userId, t.categoryId, 'Kategori', (a) => a.type === 'income');
+      const cat = await usableAccount(db, userId, t.categoryId, 'Kategori', (a) => a.type === 'income');
       return [dr(cash), cr(cat)]; // uang masuk ke dompet, asalnya dari pendapatan
     }
     case 'expense': {
-      const cat = usableAccount(db, userId, t.categoryId, 'Kategori', (a) => a.type === 'expense');
+      const cat = await usableAccount(db, userId, t.categoryId, 'Kategori', (a) => a.type === 'expense');
       return [dr(cat), cr(cash)]; // beban bertambah, uang keluar dari dompet
     }
     case 'transfer': {
-      const to = usableAccount(db, userId, t.toAccountId, 'Dompet tujuan', isCash);
+      const to = await usableAccount(db, userId, t.toAccountId, 'Dompet tujuan', isCash);
       if (to.id === cash.id) throw bad('Dompet asal dan tujuan tidak boleh sama.');
       return [dr(to), cr(cash)];
     }
     case 'capital_in':
-      return [dr(cash), cr(roleAccount(db, userId, 'capital'))];
+      return [dr(cash), cr(await roleAccount(db, userId, 'capital'))];
     default: // drawing
-      return [dr(roleAccount(db, userId, 'drawing')), cr(cash)];
+      return [dr(await roleAccount(db, userId, 'drawing')), cr(cash)];
   }
 }
 
 // ───────────────────────── Utang & piutang ─────────────────────────
 
-function debtRows(db, userId, where = '', params = []) {
-  return db.all(
+async function debtRows(db, userId, where = '', params = []) {
+  return await db.all(
     `SELECT d.id, d.kind, d.amount, d.due_date, d.description, d.contact_id, d.entry_id, d.account_id,
             e.date, c.name AS contact_name, a.name AS account_name,
             COALESCE((SELECT SUM(p.amount) FROM debt_payments p WHERE p.debt_id = d.id), 0) AS paid
@@ -383,25 +381,25 @@ function shapeDebt(r, today) {
   };
 }
 
-export function listDebts(db, userId, { today, kind, status } = {}) {
-  let items = debtRows(db, userId, kind ? 'AND d.kind = ?' : '', kind ? [kind] : []).map((r) => shapeDebt(r, today));
+export async function listDebts(db, userId, { today, kind, status } = {}) {
+  let items = (await debtRows(db, userId, kind ? 'AND d.kind = ?' : '', kind ? [kind] : [])).map((r) => shapeDebt(r, today));
   if (status === 'open') items = items.filter((d) => d.status !== 'paid');
   else if (status === 'paid') items = items.filter((d) => d.status === 'paid');
   const ids = items.map((d) => d.id);
   const payments = ids.length
-    ? db.all(`SELECT id, debt_id, amount, date FROM debt_payments WHERE debt_id IN (${ids.map(() => '?').join(',')}) ORDER BY date, id`, ...ids)
+    ? await db.all(`SELECT id, debt_id, amount, date FROM debt_payments WHERE debt_id IN (${ids.map(() => '?').join(',')}) ORDER BY date, id`, ...ids)
     : [];
   for (const d of items) d.payments = payments.filter((p) => p.debt_id === d.id).map((p) => ({ id: p.id, amount: p.amount, date: p.date }));
   return items;
 }
 
-export function debtTotals(db, userId) {
+export async function debtTotals(db, userId) {
   const out = { payable: 0, receivable: 0 };
-  for (const r of debtRows(db, userId)) out[r.kind] += Math.max(r.amount - r.paid, 0);
+  for (const r of await debtRows(db, userId)) out[r.kind] += Math.max(r.amount - r.paid, 0);
   return out;
 }
 
-export function createDebt(db, userId, body) {
+export async function createDebt(db, userId, body) {
   const kind = v.oneOf(body.kind, ['payable', 'receivable'], 'Jenis');
   const mode = v.oneOf(body.mode, ['cash', 'credit'], 'Cara');
   const amount = v.amount(body.amount);
@@ -417,84 +415,86 @@ export function createDebt(db, userId, body) {
   let lines;
   if (kind === 'payable' && mode === 'cash') {
     // Pinjam uang: kas bertambah, utang pinjaman bertambah.
-    account = roleAccount(db, userId, 'loan');
-    lines = [dr(usableAccount(db, userId, body.cashAccountId, 'Dompet', isCash)), cr(account)];
+    account = await roleAccount(db, userId, 'loan');
+    lines = [dr(await usableAccount(db, userId, body.cashAccountId, 'Dompet', isCash)), cr(account)];
   } else if (kind === 'payable') {
     // Beli sesuatu tapi belum dibayar: beban bertambah, utang usaha bertambah.
-    account = roleAccount(db, userId, 'payable');
-    lines = [dr(usableAccount(db, userId, body.categoryId, 'Kategori', (a) => a.type === 'expense' || (a.type === 'asset' && !isCash(a)))), cr(account)];
+    account = await roleAccount(db, userId, 'payable');
+    lines = [dr(await usableAccount(db, userId, body.categoryId, 'Kategori', (a) => a.type === 'expense' || (a.type === 'asset' && !isCash(a)))), cr(account)];
   } else if (mode === 'cash') {
     // Meminjamkan uang: piutang bertambah, kas berkurang.
-    account = roleAccount(db, userId, 'receivable');
-    lines = [dr(account), cr(usableAccount(db, userId, body.cashAccountId, 'Dompet', isCash))];
+    account = await roleAccount(db, userId, 'receivable');
+    lines = [dr(account), cr(await usableAccount(db, userId, body.cashAccountId, 'Dompet', isCash))];
   } else {
     // Menjual tapi belum dibayar: piutang bertambah, pendapatan bertambah.
-    account = roleAccount(db, userId, 'receivable');
-    lines = [dr(account), cr(usableAccount(db, userId, body.categoryId, 'Kategori', (a) => a.type === 'income'))];
+    account = await roleAccount(db, userId, 'receivable');
+    lines = [dr(account), cr(await usableAccount(db, userId, body.categoryId, 'Kategori', (a) => a.type === 'income'))];
   }
 
-  return db.tx(() => {
-    let contactId = checkContact(db, userId, body.contactId);
+  return await db.tx(async () => {
+    let contactId = await checkContact(db, userId, body.contactId);
     if (!contactId && newName) {
-      const existing = db.get('SELECT id FROM contacts WHERE user_id = ? AND name = ? COLLATE NOCASE', userId, newName);
-      contactId = existing?.id ?? Number(db.run('INSERT INTO contacts (user_id, name, type, created_at) VALUES (?,?,?,?)', userId, newName, kind === 'payable' ? 'supplier' : 'customer', nowIso()).lastInsertRowid);
+      const existing = await db.get('SELECT id FROM contacts WHERE user_id = ? AND lower(name) = lower(?)', userId, newName);
+      contactId = existing?.id ?? await db.insert('INSERT INTO contacts (user_id, name, type, created_at) VALUES (?,?,?,?)', userId, newName, kind === 'payable' ? 'supplier' : 'customer', nowIso());
     }
-    const entryId = createEntry(db, userId, { date, description, kind: 'debt', contactId, lines });
-    const r = db.run(
+    const entryId = await createEntry(db, userId, { date, description, kind: 'debt', contactId, lines });
+    return db.insert(
       'INSERT INTO debts (user_id, kind, account_id, contact_id, entry_id, amount, due_date, description, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
       userId, kind, account.id, contactId, entryId, amount, dueDate, description, nowIso(),
     );
-    return Number(r.lastInsertRowid);
   });
 }
 
-function getDebt(db, userId, id) {
-  const row = debtRows(db, userId, 'AND d.id = ?', [v.id(id)])[0];
+async function getDebt(db, userId, id) {
+  const row = (await debtRows(db, userId, 'AND d.id = ?', [v.id(id)]))[0];
   if (!row) throw notFound('Catatan utang/piutang tidak ditemukan.');
   return row;
 }
 
-export function payDebt(db, userId, id, body) {
-  const debt = getDebt(db, userId, id);
+export async function payDebt(db, userId, id, body) {
   const amount = v.amount(body.amount);
   const date = v.date(body.date);
-  const remaining = debt.amount - debt.paid;
-  if (remaining <= 0) throw bad('Catatan ini sudah lunas.');
-  if (amount > remaining) throw bad(`Jumlah melebihi sisa (${remaining.toLocaleString('id-ID')}).`);
-  if (date < debt.date) throw bad('Tanggal pembayaran tidak boleh sebelum tanggal utang/piutang dicatat.');
-  const cash = usableAccount(db, userId, body.cashAccountId, 'Dompet', isCash);
-  const lines = debt.kind === 'payable'
-    ? [{ accountId: debt.account_id, debit: amount, credit: 0 }, { accountId: cash.id, debit: 0, credit: amount }]
-    : [{ accountId: cash.id, debit: amount, credit: 0 }, { accountId: debt.account_id, debit: 0, credit: amount }];
-  const label = debt.kind === 'payable' ? 'Bayar utang' : 'Terima piutang';
-  return db.tx(() => {
-    const entryId = createEntry(db, userId, { date, description: `${label}: ${debt.description}`.slice(0, 200), kind: 'debt_payment', contactId: debt.contact_id, lines });
-    const r = db.run('INSERT INTO debt_payments (debt_id, entry_id, amount, date) VALUES (?,?,?,?)', debt.id, entryId, amount, date);
-    return Number(r.lastInsertRowid);
+  await getDebt(db, userId, id); // pastikan milik pengguna ini sebelum mengunci
+  return db.tx(async () => {
+    // Kunci baris utangnya, supaya dua pelunasan yang masuk bersamaan tidak
+    // sama-sama lolos pemeriksaan sisa dan membuat total bayar melebihi utang.
+    await db.get('SELECT id FROM debts WHERE id = ? FOR UPDATE', v.id(id));
+    const debt = await getDebt(db, userId, id);
+    const remaining = debt.amount - debt.paid;
+    if (remaining <= 0) throw bad('Catatan ini sudah lunas.');
+    if (amount > remaining) throw bad(`Jumlah melebihi sisa (${remaining.toLocaleString('id-ID')}).`);
+    if (date < debt.date) throw bad('Tanggal pembayaran tidak boleh sebelum tanggal utang/piutang dicatat.');
+    const cash = await usableAccount(db, userId, body.cashAccountId, 'Dompet', isCash);
+    const lines = debt.kind === 'payable'
+      ? [{ accountId: debt.account_id, debit: amount, credit: 0 }, { accountId: cash.id, debit: 0, credit: amount }]
+      : [{ accountId: cash.id, debit: amount, credit: 0 }, { accountId: debt.account_id, debit: 0, credit: amount }];
+    const label = debt.kind === 'payable' ? 'Bayar utang' : 'Terima piutang';
+    const entryId = await createEntry(db, userId, { date, description: `${label}: ${debt.description}`.slice(0, 200), kind: 'debt_payment', contactId: debt.contact_id, lines });
+    return db.insert('INSERT INTO debt_payments (debt_id, entry_id, amount, date) VALUES (?,?,?,?)', debt.id, entryId, amount, date);
   });
 }
 
-export function deleteDebt(db, userId, id) {
-  const debt = getDebt(db, userId, id);
-  db.tx(() => {
-    const payments = db.all('SELECT entry_id FROM debt_payments WHERE debt_id = ?', debt.id);
-    for (const p of payments) db.run('DELETE FROM entries WHERE id = ?', p.entry_id);
-    db.run('DELETE FROM entries WHERE id = ?', debt.entry_id); // ikut menghapus catatan utangnya
+export async function deleteDebt(db, userId, id) {
+  const debt = await getDebt(db, userId, id);
+  await db.tx(async () => {
+    const payments = await db.all('SELECT entry_id FROM debt_payments WHERE debt_id = ?', debt.id);
+    for (const p of payments) await db.run('DELETE FROM entries WHERE id = ?', p.entry_id);
+    await db.run('DELETE FROM entries WHERE id = ?', debt.entry_id); // ikut menghapus catatan utangnya
   });
 }
 
-export function deleteDebtPayment(db, userId, debtId, paymentId) {
-  const debt = getDebt(db, userId, debtId);
-  const pay = db.get('SELECT * FROM debt_payments WHERE id = ? AND debt_id = ?', v.id(paymentId), debt.id);
+export async function deleteDebtPayment(db, userId, debtId, paymentId) {
+  const debt = await getDebt(db, userId, debtId);
+  const pay = await db.get('SELECT * FROM debt_payments WHERE id = ? AND debt_id = ?', v.id(paymentId), debt.id);
   if (!pay) throw notFound('Pembayaran tidak ditemukan.');
-  db.run('DELETE FROM entries WHERE id = ?', pay.entry_id);
+  await db.run('DELETE FROM entries WHERE id = ?', pay.entry_id);
 }
 
 // ───────────────────────────── Anggaran ─────────────────────────────
 
-export function budgetStatus(db, userId, month) {
+export async function budgetStatus(db, userId, month) {
   if (!/^\d{4}-\d{2}$/.test(month)) throw bad('Bulan tidak valid.');
-  const rows = db.all(
+  const rows = await db.all(
     `SELECT a.id, a.code, a.name, COALESCE(b.amount, 0) AS budget, COALESCE(s.spent, 0) AS spent
      FROM accounts a
      LEFT JOIN budgets b ON b.account_id = a.id AND b.user_id = a.user_id
@@ -518,29 +518,29 @@ export function budgetStatus(db, userId, month) {
   };
 }
 
-export function setBudget(db, userId, accountId, amount) {
-  const acc = getAccount(db, userId, accountId, 'Kategori');
+export async function setBudget(db, userId, accountId, amount) {
+  const acc = await getAccount(db, userId, accountId, 'Kategori');
   if (acc.type !== 'expense') throw bad('Anggaran hanya bisa dipasang pada kategori pengeluaran.');
   const value = v.amount(amount, 'Anggaran', { allowZero: true });
-  if (value === 0) db.run('DELETE FROM budgets WHERE user_id = ? AND account_id = ?', userId, acc.id);
-  else db.run('INSERT INTO budgets (user_id, account_id, amount) VALUES (?,?,?) ON CONFLICT(user_id, account_id) DO UPDATE SET amount = excluded.amount', userId, acc.id, value);
+  if (value === 0) await db.run('DELETE FROM budgets WHERE user_id = ? AND account_id = ?', userId, acc.id);
+  else await db.run('INSERT INTO budgets (user_id, account_id, amount) VALUES (?,?,?) ON CONFLICT(user_id, account_id) DO UPDATE SET amount = excluded.amount', userId, acc.id, value);
 }
 
 // ───────────────────────────── Laporan ─────────────────────────────
 
-export function journalReport(db, userId, { from, to }) {
-  const res = listEntries(db, userId, { from, to, limit: 2000, order: 'ASC' });
+export async function journalReport(db, userId, { from, to }) {
+  const res = await listEntries(db, userId, { from, to, limit: 2000, order: 'ASC' });
   const total = res.items.reduce((s, e) => s + e.amount, 0);
   return { from, to, entries: res.items, totalDebit: total, totalCredit: total, truncated: res.total > res.items.length };
 }
 
-export function ledgerReport(db, userId, { from, to, accountId }) {
-  const accounts = db.all(`SELECT * FROM accounts WHERE user_id = ? ${accountId ? 'AND id = ?' : ''} ORDER BY code`, ...(accountId ? [userId, accountId] : [userId]));
+export async function ledgerReport(db, userId, { from, to, accountId }) {
+  const accounts = await db.all(`SELECT * FROM accounts WHERE user_id = ? ${accountId ? 'AND id = ?' : ''} ORDER BY code`, ...(accountId ? [userId, accountId] : [userId]));
   if (accountId && !accounts.length) throw notFound('Akun tidak ditemukan.');
-  const opening = new Map(sums(db, userId, { before: from }).map((r) => [r.id, r]));
+  const opening = new Map((await sums(db, userId, { before: from })).map((r) => [r.id, r]));
   const out = [];
   for (const acc of accounts) {
-    const rows = db.all(
+    const rows = await db.all(
       `SELECT e.id AS entry_id, e.date, e.description, l.debit, l.credit
        FROM lines l JOIN entries e ON e.id = l.entry_id
        WHERE l.account_id = ? AND e.date >= ? AND e.date <= ?
@@ -564,11 +564,11 @@ export function ledgerReport(db, userId, { from, to, accountId }) {
   return { from, to, accounts: out };
 }
 
-export function trialBalance(db, userId, { to }) {
+export async function trialBalance(db, userId, { to }) {
   const rows = [];
   let totalDebit = 0;
   let totalCredit = 0;
-  for (const r of sums(db, userId, { to })) {
+  for (const r of await sums(db, userId, { to })) {
     const net = r.d - r.c;
     if (net === 0 && r.d === 0) continue;
     const debit = net > 0 ? net : 0;
@@ -588,8 +588,8 @@ const IS_SECTIONS = [
   ['other_expense', 'Beban Lain-lain', 'expense'],
 ];
 
-export function incomeStatement(db, userId, { from, to }) {
-  const rows = sums(db, userId, { from, to });
+export async function incomeStatement(db, userId, { from, to }) {
+  const rows = await sums(db, userId, { from, to });
   const sections = IS_SECTIONS.map(([key, label, type]) => {
     const items = rows
       .filter((r) => r.type === type && r.subtype === key)
@@ -608,11 +608,11 @@ export function incomeStatement(db, userId, { from, to }) {
   };
 }
 
-export function balanceSheet(db, userId, { to }) {
-  const rows = sums(db, userId, { to });
+export async function balanceSheet(db, userId, { to }) {
+  const rows = await sums(db, userId, { to });
   const yearStart = `${to.slice(0, 4)}-01-01`;
-  const earlier = netIncome(sums(db, userId, { before: yearStart }));
-  const current = netIncome(sums(db, userId, { from: yearStart, to }));
+  const earlier = netIncome(await sums(db, userId, { before: yearStart }));
+  const current = netIncome(await sums(db, userId, { from: yearStart, to }));
   const item = (r, amount) => ({ id: r.id, code: r.code, name: r.name, amount });
   const nz = (list) => list.filter((i) => i.amount !== 0);
   const sum = (list) => list.reduce((s, i) => s + i.amount, 0);
@@ -637,10 +637,10 @@ export function balanceSheet(db, userId, { to }) {
   };
 }
 
-export function equityStatement(db, userId, { from, to }) {
+export async function equityStatement(db, userId, { from, to }) {
   const equityOf = (rows) => rows.filter((r) => r.type === 'equity').reduce((s, r) => s + (r.c - r.d), 0) + netIncome(rows);
-  const period = sums(db, userId, { from, to });
-  const opening = equityOf(sums(db, userId, { before: from }));
+  const period = await sums(db, userId, { from, to });
+  const opening = equityOf(await sums(db, userId, { before: from }));
   const contributions = period.filter((r) => r.type === 'equity' && r.subtype !== 'drawing').reduce((s, r) => s + (r.c - r.d), 0);
   const drawings = period.filter((r) => r.type === 'equity' && r.subtype === 'drawing').reduce((s, r) => s + (r.d - r.c), 0);
   const net = netIncome(period);
@@ -660,13 +660,13 @@ function flowSection(a) {
   return 'financing';
 }
 
-export function cashFlow(db, userId, { from, to }) {
+export async function cashFlow(db, userId, { from, to }) {
   const cashBalance = (rows) => rows.filter(isCash).reduce((s, r) => s + (r.d - r.c), 0);
-  const opening = cashBalance(sums(db, userId, { before: from }));
-  const closing = cashBalance(sums(db, userId, { to }));
+  const opening = cashBalance(await sums(db, userId, { before: from }));
+  const closing = cashBalance(await sums(db, userId, { to }));
   // Untuk tiap jurnal yang menyentuh kas, sisi "lawannya" menjelaskan
   // uang itu datang dari mana / dipakai untuk apa.
-  const rows = db.all(
+  const rows = await db.all(
     `SELECT a.id, a.code, a.name, a.type, a.subtype, SUM(l.credit - l.debit) AS flow
      FROM lines l
      JOIN entries e ON e.id = l.entry_id
@@ -691,8 +691,8 @@ export function cashFlow(db, userId, { from, to }) {
   return { from, to, opening, sections, netChange, closing, consistent: opening + netChange === closing };
 }
 
-export function debtReport(db, userId, { today }) {
-  const debts = listDebts(db, userId, { today, status: 'open' });
+export async function debtReport(db, userId, { today }) {
+  const debts = await listDebts(db, userId, { today, status: 'open' });
   const group = (kind) => {
     const items = debts.filter((d) => d.kind === kind);
     return { items, total: items.reduce((s, d) => s + d.remaining, 0), overdue: items.filter((d) => d.status === 'overdue').reduce((s, d) => s + d.remaining, 0) };
@@ -720,19 +720,19 @@ const monthAdd = (ym, n) => {
 const dayDiff = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 const dayAdd = (date, n) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-export function dashboard(db, userId, { from, to, pfrom, pto, today }) {
-  const periodRows = sums(db, userId, { from, to });
+export async function dashboard(db, userId, { from, to, pfrom, pto, today }) {
+  const periodRows = await sums(db, userId, { from, to });
   const period = periodTotals(periodRows);
-  const previous = pfrom && pto ? periodTotals(sums(db, userId, { from: pfrom, to: pto })) : null;
+  const previous = pfrom && pto ? periodTotals(await sums(db, userId, { from: pfrom, to: pto })) : null;
 
-  const asOf = sums(db, userId, { to });
+  const asOf = await sums(db, userId, { to });
   const wallets = asOf.filter((r) => isCash(r) && (!r.archived || r.d - r.c !== 0)).map((r) => ({ id: r.id, name: r.name, balance: r.d - r.c }));
   const cashBalance = wallets.reduce((s, w) => s + w.balance, 0);
 
   // Pemasukan vs pengeluaran 6 bulan terakhir (berakhir di bulan "to").
   const endMonth = to.slice(0, 7);
   const months = Array.from({ length: 6 }, (_, i) => monthAdd(endMonth, i - 5));
-  const monthlyRows = db.all(
+  const monthlyRows = await db.all(
     `SELECT substr(e.date, 1, 7) AS ym, a.type, SUM(l.debit) AS d, SUM(l.credit) AS c
      FROM lines l JOIN entries e ON e.id = l.entry_id JOIN accounts a ON a.id = l.account_id
      WHERE e.user_id = ? AND e.date >= ? AND e.date <= ? AND a.type IN ('income', 'expense')
@@ -752,20 +752,21 @@ export function dashboard(db, userId, { from, to, pfrom, pto, today }) {
     .sort((a, b) => b.amount - a.amount);
 
   // Tren saldo kas harian pada periode terpilih (dirapatkan kalau terlalu panjang).
-  const first = db.get('SELECT MIN(date) AS d FROM entries WHERE user_id = ?', userId).d;
+  const first = (await db.get('SELECT MIN(date) AS d FROM entries WHERE user_id = ?', userId)).d;
   let start = from;
   if (first && start < first) start = first;
   const end = today && to > today ? today : to;
   const cashTrend = [];
   if (first && start <= end) {
-    const before = sums(db, userId, { before: start }).filter(isCash).reduce((s, r) => s + (r.d - r.c), 0);
-    const deltas = new Map(db.all(
+    const before = (await sums(db, userId, { before: start })).filter(isCash).reduce((s, r) => s + (r.d - r.c), 0);
+    const deltaRows = await db.all(
       `SELECT e.date, SUM(l.debit - l.credit) AS delta
        FROM lines l JOIN entries e ON e.id = l.entry_id JOIN accounts a ON a.id = l.account_id
        WHERE e.user_id = ? AND e.date >= ? AND e.date <= ? AND a.type = 'asset' AND a.subtype = 'cash'
        GROUP BY e.date`,
       userId, start, end,
-    ).map((r) => [r.date, r.delta]));
+    );
+    const deltas = new Map(deltaRows.map((r) => [r.date, r.delta]));
     const days = dayDiff(start, end) + 1;
     const step = Math.max(1, Math.ceil(days / 62));
     let balance = before;
@@ -776,8 +777,8 @@ export function dashboard(db, userId, { from, to, pfrom, pto, today }) {
     }
   }
 
-  const recent = listEntries(db, userId, { from, to, limit: 6 }).items.map(({ lines, ...rest }) => rest);
-  const openDebts = listDebts(db, userId, { today, status: 'open' });
+  const recent = (await listEntries(db, userId, { from, to, limit: 6 })).items.map(({ lines, ...rest }) => rest);
+  const openDebts = await listDebts(db, userId, { today, status: 'open' });
   const debtSum = (kind) => openDebts.filter((d) => d.kind === kind).reduce((s, d) => s + d.remaining, 0);
 
   return {
@@ -788,7 +789,7 @@ export function dashboard(db, userId, { from, to, pfrom, pto, today }) {
     monthly,
     expenseByCategory: byCategory('expense'),
     incomeByCategory: byCategory('income'),
-    budget: budgetStatus(db, userId, endMonth),
+    budget: await budgetStatus(db, userId, endMonth),
     cashTrend,
     recent,
     debts: {
