@@ -45,7 +45,7 @@ function Row({ label, amount, code, bold, total, indent }: { label: string; amou
   return (
     <tr className={cn(total && "border-t border-line-strong")}>
       <td className={cn("py-1.5 pr-4 text-sm", indent && "pl-4", (bold || total) && "font-bold")}>
-        {code && <span className="tnum mr-2 text-muted">{code}</span>}
+        {code && <span className="tnum text-muted">{code} </span>}
         {label}
       </td>
       <td className={cn("tnum py-1.5 text-right text-sm whitespace-nowrap", (bold || total) && "font-bold")}>{amount === null ? "" : money(amount)}</td>
@@ -181,7 +181,34 @@ function TrialBalance({ r }: { r: any }) {
   if (!r.rows.length) return <Empty title="Belum ada saldo" />;
   return (
     <>
-      <table className="w-full">
+      {/* HP: satu baris per akun dengan label Debit/Kredit; tiga kolom angka tidak muat di layar sempit. */}
+      <div className="md:hidden print:hidden">
+        <ul className="divide-y divide-line border-y border-line">
+          {(r.rows as { id: number; code: string; name: string; debit: number; credit: number }[]).map((a) => (
+            <li key={a.id} className="flex items-baseline justify-between gap-3 py-2 text-sm">
+              <span className="min-w-0 break-words">
+                <span className="tnum text-muted">{a.code} </span>
+                {a.name}
+              </span>
+              <span className="tnum shrink-0 whitespace-nowrap">
+                <span className="mr-1 text-xs text-muted">{a.debit ? "Debit" : "Kredit"}</span>
+                {rp(a.debit || a.credit)}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <dl className="tnum mt-3 space-y-1 border-t-2 border-ink pt-3 text-sm font-extrabold">
+          <div className="flex justify-between gap-3">
+            <dt>Total debit</dt>
+            <dd>{rp(r.totalDebit)}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt>Total kredit</dt>
+            <dd>{rp(r.totalCredit)}</dd>
+          </div>
+        </dl>
+      </div>
+      <table className="hidden w-full md:table print:table">
         <thead>
           <tr>
             <th scope="col" className={`${colHead} text-left`}>Akun</th>
@@ -192,8 +219,8 @@ function TrialBalance({ r }: { r: any }) {
         <tbody className="divide-y divide-line">
           {(r.rows as { id: number; code: string; name: string; debit: number; credit: number }[]).map((a) => (
             <tr key={a.id}>
-              <td className="py-2 text-sm">
-                <span className="tnum mr-2 text-muted">{a.code}</span>
+              <td className="py-2 pr-3 text-sm">
+                <span className="tnum text-muted">{a.code} </span>
                 {a.name}
               </td>
               <td className="tnum py-2 text-right text-sm">{a.debit ? rp(a.debit) : ""}</td>
@@ -225,7 +252,36 @@ function Ledger({ r }: { r: any }) {
             <span className="tnum mr-2 text-muted">{a.code}</span>
             {a.name}
           </h3>
-          <div className="relative overflow-x-auto">
+          {/* HP: satu kartu per catatan, karena lima kolom tidak muat di layar sempit. */}
+          <ul className="divide-y divide-line border-y border-line md:hidden print:hidden">
+            <li className="flex items-baseline justify-between gap-3 py-2 text-sm text-muted">
+              <span>Saldo awal</span>
+              <span className="tnum">{money(a.openingBalance)}</span>
+            </li>
+            {a.lines.map((l, i) => (
+              <li key={i} className="py-2.5 text-sm">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="tnum text-xs text-muted">{fmtDate(l.date)}</span>
+                  <span className="tnum font-semibold whitespace-nowrap">
+                    <span className="mr-1 text-xs font-normal text-muted">{l.debit ? "Debit" : "Kredit"}</span>
+                    {rp(l.debit || l.credit)}
+                  </span>
+                </div>
+                <p className="mt-0.5 break-words">{l.description}</p>
+                <p className="tnum mt-0.5 text-right text-xs text-muted">Saldo {money(l.balance)}</p>
+              </li>
+            ))}
+            <li className="tnum space-y-0.5 py-2.5 text-sm">
+              <p className="flex justify-between gap-3 font-bold">
+                <span>Saldo akhir</span>
+                <span>{money(a.closingBalance)}</span>
+              </p>
+              <p className="text-xs text-muted">
+                Debit {rp(a.totalDebit)} · Kredit {rp(a.totalCredit)}
+              </p>
+            </li>
+          </ul>
+          <div className="relative hidden overflow-x-auto md:block print:block">
             <table className="w-full min-w-[34rem]">
               <thead>
                 <tr>
@@ -247,7 +303,7 @@ function Ledger({ r }: { r: any }) {
                 {a.lines.map((l, i) => (
                   <tr key={i}>
                     <td className="tnum py-2 text-sm whitespace-nowrap text-muted">{fmtDate(l.date)}</td>
-                    <td className="py-2 pr-3 text-sm">{l.description}</td>
+                    <td className="py-2 pr-3 text-sm wrap-anywhere">{l.description}</td>
                     <td className="tnum py-2 text-right text-sm whitespace-nowrap">{l.debit ? rp(l.debit) : ""}</td>
                     <td className="tnum py-2 text-right text-sm whitespace-nowrap">{l.credit ? rp(l.credit) : ""}</td>
                     <td className="tnum py-2 text-right text-sm whitespace-nowrap">{money(l.balance)}</td>
@@ -273,61 +329,108 @@ function Ledger({ r }: { r: any }) {
 
 export function JournalTable({ entries, totalDebit, totalCredit, actions }: { entries: Entry[]; totalDebit?: number; totalCredit?: number; actions?: (e: Entry) => ReactNode }) {
   return (
-    <div className="relative overflow-x-auto">
-      <table className="w-full min-w-[34rem]">
-        <thead>
-          <tr>
-            <th scope="col" className={`${colHead} w-28 text-left`}>Tanggal</th>
-            <th scope="col" className={`${colHead} text-left`}>Akun & keterangan</th>
-            <th scope="col" className={`${colHead} text-right`}>Debit</th>
-            <th scope="col" className={`${colHead} text-right`}>Kredit</th>
-            {actions && (
-              <th scope="col" className={`${colHead} no-print w-20`}>
-                <span className="sr-only">Aksi</span>
-              </th>
-            )}
-          </tr>
-        </thead>
-        {entries.map((e) => (
-          <tbody key={e.id} className="border-b border-line">
+    <>
+      {/* HP: satu kartu per catatan, debit & kredit tampil di samping tiap akun. */}
+      <div className="md:hidden print:hidden">
+        <ul>
+          {entries.map((e) => (
+            <li key={e.id} className="border-b border-line py-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="tnum text-xs text-muted">{fmtDate(e.date)}</p>
+                  <p className="text-sm font-semibold break-words">
+                    {e.description}
+                    {e.contact && <span className="font-normal text-muted"> · {e.contact.name}</span>}
+                  </p>
+                </div>
+                {actions && <div className="no-print -my-1 -mr-2 shrink-0">{actions(e)}</div>}
+              </div>
+              <ul className="mt-2 space-y-1">
+                {e.lines.map((l, i) => (
+                  <li key={i} className={cn("flex items-baseline justify-between gap-3 text-sm", l.credit > 0 && "pl-4")}>
+                    <span className="min-w-0 break-words">
+                      <span className="tnum text-muted">{l.code} </span>
+                      {l.name}
+                    </span>
+                    <span className="tnum shrink-0 whitespace-nowrap">
+                      <span className="mr-1 text-xs text-muted">{l.debit ? "Debit" : "Kredit"}</span>
+                      {rp(l.debit || l.credit)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+        {totalDebit !== undefined && (
+          <dl className="tnum mt-3 space-y-1 border-t-2 border-ink pt-3 text-sm font-extrabold">
+            <div className="flex justify-between gap-3">
+              <dt>Total debit</dt>
+              <dd>{rp(totalDebit)}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt>Total kredit</dt>
+              <dd>{rp(totalCredit ?? 0)}</dd>
+            </div>
+          </dl>
+        )}
+      </div>
+      <div className="relative hidden overflow-x-auto md:block print:block">
+        <table className="w-full min-w-[34rem]">
+          <thead>
             <tr>
-              <td className="tnum pt-3 text-sm whitespace-nowrap text-muted">{fmtDate(e.date)}</td>
-              <td className="pt-3 text-sm font-semibold" colSpan={3}>
-                {e.description}
-                {e.contact && <span className="ml-2 font-normal text-muted">· {e.contact.name}</span>}
-              </td>
+              <th scope="col" className={`${colHead} w-28 text-left`}>Tanggal</th>
+              <th scope="col" className={`${colHead} text-left`}>Akun & keterangan</th>
+              <th scope="col" className={`${colHead} text-right`}>Debit</th>
+              <th scope="col" className={`${colHead} text-right`}>Kredit</th>
               {actions && (
-                <td rowSpan={e.lines.length + 1} className="no-print pt-1.5 text-right align-top">
-                  {actions(e)}
-                </td>
+                <th scope="col" className={`${colHead} no-print w-20`}>
+                  <span className="sr-only">Aksi</span>
+                </th>
               )}
             </tr>
-            {e.lines.map((l, i) => (
-              <tr key={i}>
-                <td />
-                <td className={cn("py-1 text-sm", l.credit > 0 && "pl-6", i === e.lines.length - 1 && "pb-3")}>
-                  <span className="tnum mr-2 text-muted">{l.code}</span>
-                  {l.name}
+          </thead>
+          {entries.map((e) => (
+            <tbody key={e.id} className="border-b border-line">
+              <tr>
+                <td className="tnum pt-3 text-sm whitespace-nowrap text-muted">{fmtDate(e.date)}</td>
+                <td className="pt-3 text-sm font-semibold wrap-anywhere" colSpan={3}>
+                  {e.description}
+                  {e.contact && <span className="ml-2 font-normal text-muted">· {e.contact.name}</span>}
                 </td>
-                <td className={cn("tnum py-1 text-right text-sm whitespace-nowrap", i === e.lines.length - 1 && "pb-3")}>{l.debit ? rp(l.debit) : ""}</td>
-                <td className={cn("tnum py-1 text-right text-sm whitespace-nowrap", i === e.lines.length - 1 && "pb-3")}>{l.credit ? rp(l.credit) : ""}</td>
+                {actions && (
+                  <td rowSpan={e.lines.length + 1} className="no-print pt-1.5 text-right align-top">
+                    {actions(e)}
+                  </td>
+                )}
               </tr>
-            ))}
-          </tbody>
-        ))}
-        {totalDebit !== undefined && (
-          <tfoot>
-            <tr className="border-t-2 border-ink">
-              <td />
-              <td className="pt-3 font-extrabold">Total</td>
-              <td className="tnum pt-3 text-right font-extrabold">{rp(totalDebit)}</td>
-              <td className="tnum pt-3 text-right font-extrabold">{rp(totalCredit ?? 0)}</td>
-              {actions && <td />}
-            </tr>
-          </tfoot>
-        )}
-      </table>
-    </div>
+              {e.lines.map((l, i) => (
+                <tr key={i}>
+                  <td />
+                  <td className={cn("py-1 text-sm wrap-anywhere", l.credit > 0 && "pl-6", i === e.lines.length - 1 && "pb-3")}>
+                    <span className="tnum mr-2 text-muted">{l.code}</span>
+                    {l.name}
+                  </td>
+                  <td className={cn("tnum py-1 text-right text-sm whitespace-nowrap", i === e.lines.length - 1 && "pb-3")}>{l.debit ? rp(l.debit) : ""}</td>
+                  <td className={cn("tnum py-1 text-right text-sm whitespace-nowrap", i === e.lines.length - 1 && "pb-3")}>{l.credit ? rp(l.credit) : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          ))}
+          {totalDebit !== undefined && (
+            <tfoot>
+              <tr className="border-t-2 border-ink">
+                <td />
+                <td className="pt-3 font-extrabold">Total</td>
+                <td className="tnum pt-3 text-right font-extrabold">{rp(totalDebit)}</td>
+                <td className="tnum pt-3 text-right font-extrabold">{rp(totalCredit ?? 0)}</td>
+                {actions && <td />}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -338,48 +441,81 @@ function DebtReport({ r }: { r: any }) {
       {g.items.length === 0 ? (
         <p className="text-sm text-muted">Tidak ada.</p>
       ) : (
-        <div className="relative overflow-x-auto">
-          <table className="w-full min-w-[36rem]">
-            <thead>
-              <tr>
-                <th scope="col" className={`${colHead} text-left`}>Kontak & keterangan</th>
-                <th scope="col" className={`${colHead} text-left`}>Jatuh tempo</th>
-                <th scope="col" className={`${colHead} text-right`}>Jumlah</th>
-                <th scope="col" className={`${colHead} text-right`}>Dibayar</th>
-                <th scope="col" className={`${colHead} text-right`}>Sisa</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
+        <>
+          <div className="md:hidden print:hidden">
+            <ul className="divide-y divide-line">
               {g.items.map((d) => (
-                <tr key={d.id}>
-                  <td className="py-2 pr-3 text-sm">
-                    <span className="font-semibold">{d.contact?.name ?? "Tanpa nama"}</span>
-                    <span className="block text-[13px] text-muted">{d.description}</span>
-                  </td>
-                  <td className="py-2 text-sm whitespace-nowrap">
-                    {d.dueDate ? fmtDate(d.dueDate) : "-"}
-                    {d.status === "overdue" && (
-                      <Badge tone="bad" className="ml-2">
-                        Terlambat
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="tnum py-2 text-right text-sm whitespace-nowrap">{rp(d.amount)}</td>
-                  <td className="tnum py-2 text-right text-sm whitespace-nowrap">{rp(d.paid)}</td>
-                  <td className="tnum py-2 text-right text-sm font-semibold whitespace-nowrap">{rp(d.remaining)}</td>
-                </tr>
+                <li key={d.id} className="py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold break-words">{d.contact?.name ?? "Tanpa nama"}</p>
+                      <p className="text-[13px] break-words text-muted">{d.description}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-xs text-muted">Sisa</p>
+                      <p className="tnum text-sm font-semibold whitespace-nowrap">{rp(d.remaining)}</p>
+                    </div>
+                  </div>
+                  <p className="tnum mt-1.5 text-xs text-muted">
+                    Jumlah {rp(d.amount)} · Dibayar {rp(d.paid)}
+                  </p>
+                  <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                    Jatuh tempo {d.dueDate ? fmtDate(d.dueDate) : "-"}
+                    {d.status === "overdue" && <Badge tone="bad">Terlambat</Badge>}
+                  </p>
+                </li>
               ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-ink">
-                <td className="pt-3 font-extrabold" colSpan={4}>
-                  Total sisa{g.overdue > 0 && <span className="ml-2 text-[13px] font-semibold text-bad">(terlambat {rp(g.overdue)})</span>}
-                </td>
-                <td className="tnum pt-3 text-right font-extrabold whitespace-nowrap">{rp(g.total)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+            </ul>
+            <p className="mt-1 flex items-baseline justify-between gap-3 border-t-2 border-ink pt-3 text-sm font-extrabold">
+              <span>
+                Total sisa{g.overdue > 0 && <span className="ml-2 text-[13px] font-semibold text-bad">(terlambat {rp(g.overdue)})</span>}
+              </span>
+              <span className="tnum whitespace-nowrap">{rp(g.total)}</span>
+            </p>
+          </div>
+          <div className="relative hidden overflow-x-auto md:block print:block">
+            <table className="w-full min-w-[36rem]">
+              <thead>
+                <tr>
+                  <th scope="col" className={`${colHead} text-left`}>Kontak & keterangan</th>
+                  <th scope="col" className={`${colHead} text-left`}>Jatuh tempo</th>
+                  <th scope="col" className={`${colHead} text-right`}>Jumlah</th>
+                  <th scope="col" className={`${colHead} text-right`}>Dibayar</th>
+                  <th scope="col" className={`${colHead} text-right`}>Sisa</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {g.items.map((d) => (
+                  <tr key={d.id}>
+                    <td className="py-2 pr-3 text-sm wrap-anywhere">
+                      <span className="font-semibold">{d.contact?.name ?? "Tanpa nama"}</span>
+                      <span className="block text-[13px] text-muted">{d.description}</span>
+                    </td>
+                    <td className="py-2 text-sm whitespace-nowrap">
+                      {d.dueDate ? fmtDate(d.dueDate) : "-"}
+                      {d.status === "overdue" && (
+                        <Badge tone="bad" className="ml-2">
+                          Terlambat
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="tnum py-2 text-right text-sm whitespace-nowrap">{rp(d.amount)}</td>
+                    <td className="tnum py-2 text-right text-sm whitespace-nowrap">{rp(d.paid)}</td>
+                    <td className="tnum py-2 text-right text-sm font-semibold whitespace-nowrap">{rp(d.remaining)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-ink">
+                  <td className="pt-3 font-extrabold" colSpan={4}>
+                    Total sisa{g.overdue > 0 && <span className="ml-2 text-[13px] font-semibold text-bad">(terlambat {rp(g.overdue)})</span>}
+                  </td>
+                  <td className="tnum pt-3 text-right font-extrabold whitespace-nowrap">{rp(g.total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </>
       )}
     </section>
   );
@@ -468,14 +604,14 @@ export function ReportsPage({ user, slug }: { user: User; slug: string }) {
       </PageHeader>
       </div>
 
-      <nav aria-label="Jenis laporan" className="no-print -mx-4 mb-6 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <ul className="flex gap-1.5 sm:flex-wrap">
+      <nav aria-label="Jenis laporan" className="no-print mb-6">
+        <ul className="flex flex-wrap gap-1.5">
           {REPORTS.map((r) => (
             <li key={r.slug}>
               <a
                 href={`#/laporan/${r.slug}`}
                 aria-current={r.slug === def.slug ? "page" : undefined}
-                className={cn("inline-flex h-9 items-center rounded-full border px-4 text-[13px] font-semibold whitespace-nowrap transition-colors", r.slug === def.slug ? "border-ink bg-ink text-white" : "border-line-strong text-ink-soft hover:bg-paper")}
+                className={cn("inline-flex h-8 items-center rounded-full border px-3 text-[13px] font-semibold whitespace-nowrap transition-colors sm:h-9 sm:px-4", r.slug === def.slug ? "border-ink bg-ink text-white" : "border-line-strong text-ink-soft hover:bg-paper")}
               >
                 {r.title}
               </a>
@@ -484,9 +620,9 @@ export function ReportsPage({ user, slug }: { user: User; slug: string }) {
         </ul>
       </nav>
 
-      <Card className="print-plain p-6 sm:p-10">
+      <Card className="print-plain p-4 sm:p-10">
         <header className="mb-6 border-b border-line pb-6 text-center">
-          <p className="text-sm font-semibold text-muted">{user.businessName || user.name}</p>
+          <p className="text-sm font-semibold text-muted wrap-anywhere">{user.businessName || user.name}</p>
           <h2 className="mt-1 text-2xl font-extrabold tracking-tight">{def.title}</h2>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
         </header>
@@ -508,7 +644,7 @@ export function ReportsPage({ user, slug }: { user: User; slug: string }) {
           </div>
         )}
 
-        <div className={cn("mx-auto", ["income-statement", "cash-flow", "equity", "trial-balance"].includes(def.api) && "max-w-2xl")}>
+        <div className={cn("mx-auto overflow-x-auto", ["income-statement", "cash-flow", "equity", "trial-balance"].includes(def.api) && "max-w-2xl")}>
           {/* key: ganti jenis laporan = mulai dari kosong, supaya data laporan lama tidak dipakai laporan baru */}
           <ReportBody key={def.api} api={def.api} query={query} />
         </div>

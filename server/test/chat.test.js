@@ -4,7 +4,7 @@ import { startServer } from './helpers.js';
 import { loadConfig } from '../config.js';
 
 async function seed(s, c, email) {
-  await s.signUp(c, { email, name: 'Dewi Lestari', usage: 'pribadi', openingCash: 1_000_000, openingBank: 4_000_000, date: '2026-03-01' });
+  await s.signUp(c, { email, name: 'Dewi Lestari', usage: 'pribadi', openingCash: 1_000_000, openingBank: 4_000_000, date: '2026-01-01' });
   const A = Object.fromEntries((await c.get('/api/accounts')).data.accounts.map((a) => [a.name, a.id]));
   const add = (body) => c.post('/api/transactions', body);
   await add({ kind: 'income', date: '2026-03-02', amount: 6_000_000, description: 'Gaji Maret', categoryId: A.Gaji, cashAccountId: A.Bank });

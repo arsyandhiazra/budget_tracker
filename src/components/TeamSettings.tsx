@@ -76,14 +76,14 @@ function OwnerTeam() {
           <h3 className="mb-2 text-sm font-bold">Yang punya akses</h3>
           <ul className="divide-y divide-line rounded-2xl border border-line">
             <li className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
-              <span className="min-w-0">
+              <span className="min-w-0 wrap-anywhere">
                 <strong>{data.owner.name}</strong> <span className="text-muted">· {data.owner.email}</span>
               </span>
               <Badge>{ROLE_LABEL.owner} (kamu)</Badge>
             </li>
             {data.members.map((m) => (
               <li key={m.userId} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
-                <span className="min-w-0">
+                <span className="min-w-0 wrap-anywhere">
                   <strong>{m.name}</strong> <span className="text-muted">· {m.email}</span>
                   <span className="block text-[13px] text-muted">Bergabung {fmtDate(m.joinedAt.slice(0, 10))}</span>
                 </span>
@@ -162,7 +162,7 @@ export function TeamSettings({ user, books, onSwitchBook, onChanged }: { user: U
   return (
     <div className="space-y-3 text-sm">
       <p>
-        Kamu membuka pembukuan <strong>{user.businessName}</strong> sebagai <Badge>{ROLE_LABEL[user.role]}</Badge>
+        Kamu membuka pembukuan <strong className="wrap-anywhere">{user.businessName}</strong> sebagai <Badge>{ROLE_LABEL[user.role]}</Badge>
       </p>
       <p className="text-muted">{ROLE_HELP[user.role as Assignable]} Hanya pemilik yang bisa mengundang atau mengeluarkan anggota.</p>
       <Button variant="secondary" onClick={leave}>

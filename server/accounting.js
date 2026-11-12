@@ -3,7 +3,7 @@
 // Ibarat timbangan: kalau kas bertambah, harus jelas dari mana asalnya.
 // Pengguna tidak perlu paham ini — form sederhana (pemasukan/pengeluaran)
 // otomatis diubah menjadi jurnal oleh fungsi-fungsi di file ini.
-import { bad, notFound, v } from './http.js';
+import { HttpError, bad, notFound, v } from './http.js';
 import { nowIso } from './db.js';
 
 export const TYPES = ['asset', 'liability', 'equity', 'income', 'expense'];
@@ -219,7 +219,7 @@ async function cleanLines(db, userId, lines) {
     if ((debit > 0) === (credit > 0)) throw bad('Setiap baris diisi salah satu saja: debit atau kredit.');
     totalDebit += debit;
     totalCredit += credit;
-    out.push({ accountId: acc.id, debit, credit });
+    out.push({ accountId: acc.id, debit, credit, cash: isCash(acc), name: acc.name });
   }
   if (totalDebit !== totalCredit) throw bad('Total debit dan kredit harus sama (seimbang).');
   return { lines: out, amount: totalDebit };
@@ -232,6 +232,142 @@ async function checkContact(db, userId, contactId) {
   return row.id;
 }
 
+// ───────────── Saldo dompet tidak boleh minus ─────────────
+// Setiap perubahan yang MENGURANGI uang di sebuah dompet (kas, bank, dompet digital) ditolak kalau
+// membuat saldo dompet itu minus pada tanggal mana pun, termasuk transaksi bertanggal mundur yang
+// membuat saldo hari-hari sesudahnya minus. Yang dihitung hanya efek dari perubahan itu: saldo yang
+// SUDAH minus dari data lama tetap bisa diperbaiki (ditambah), hanya tidak boleh makin dalam.
+// Aturan ini berlaku untuk semua jalur: transaksi, transfer, prive, utang/piutang, jurnal manual,
+// faktur, impor, dan juga ubah/hapus catatan lama.
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+const idr = (n) => `Rp ${Math.round(n).toLocaleString('id-ID')}`;
+const idDate = (d) => {
+  const [y, m, day] = d.split('-').map(Number);
+  return `${day} ${SHORT_MONTHS[m - 1]} ${y}`;
+};
+
+// deltas: Map<idDompet, { name, days: Map<tanggal, perubahan> }>; angka positif = uang masuk.
+export function addCash(deltas, line, date, sign = 1) {
+  if (!line.cash) return;
+  const change = sign * (line.debit - line.credit);
+  if (!change) return;
+  const wallet = deltas.get(line.accountId) ?? { name: line.name, days: new Map() };
+  wallet.days.set(date, (wallet.days.get(date) ?? 0) + change);
+  deltas.set(line.accountId, wallet);
+}
+
+const OLD_LINES = `SELECT l.account_id AS "accountId", l.debit, l.credit, a.name, (a.type = 'asset' AND a.subtype = 'cash') AS cash
+  FROM lines l JOIN accounts a ON a.id = l.account_id WHERE l.entry_id = ?`;
+
+/**
+ * Mencari tanggal pertama saat saldo dompet jadi (lebih) minus karena sebuah perubahan.
+ * rows  = saldo bersih per tanggal yang ada di database (urut tanggal)
+ * days  = perubahan dari transaksi ini per tanggal
+ * applied = true kalau rows SUDAH memuat perubahan itu (setelah ditulis), false kalau belum (pratinjau)
+ */
+export function firstOverdraft(rows, days, applied) {
+  const changes = [...days.entries()].filter(([, c]) => c).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  if (!changes.length) return null;
+  const dates = [...new Set([...rows.map((r) => r.date), ...changes.map(([d]) => d)])].sort();
+  let ri = 0;
+  let ci = 0;
+  let balance = 0;
+  let cum = 0;
+  for (const date of dates) {
+    while (ri < rows.length && rows[ri].date <= date) balance += rows[ri++].net;
+    while (ci < changes.length && changes[ci][0] <= date) cum += changes[ci++][1];
+    const after = applied ? balance : balance + cum;
+    if (cum < 0 && after < 0) return { date, shortage: -after, before: after - cum };
+  }
+  return null;
+}
+
+// Hanya dompet yang pernah berkurang (secara kumulatif) yang perlu diperiksa.
+function walletsAtRisk(deltas) {
+  return [...deltas.entries()]
+    .filter(([, w]) => {
+      let cum = 0;
+      for (const [, change] of [...w.days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+        cum += change;
+        if (cum < 0) return true;
+      }
+      return false;
+    })
+    .sort((a, b) => a[0] - b[0]);
+}
+
+const dailyNet = (db, userId, walletId) => db.all(
+  'SELECT e.date, SUM(l.debit - l.credit) AS net FROM lines l JOIN entries e ON e.id = l.entry_id WHERE l.account_id = ? AND e.user_id = ? GROUP BY e.date ORDER BY e.date',
+  walletId, userId,
+);
+
+function overdraftError(name, hit, op) {
+  const have = Math.max(hit.before, 0);
+  const when = idDate(hit.date);
+  let message;
+  if (op === 'delete') message = `Catatan ini tidak bisa dihapus karena uang darinya sudah terpakai: saldo ${name} pada ${when} akan minus ${idr(hit.shortage)}.`;
+  else if (op === 'import') message = `Impor ini membuat saldo ${name} minus pada ${when} (kurang ${idr(hit.shortage)}). Catat saldo awal atau pemasukan lebih dulu, atau keluarkan baris pengeluarannya dari file.`;
+  else message = `Saldo ${name} tidak cukup. Pada ${when} saldonya hanya ${idr(have)}, sedangkan ${op === 'update' ? 'perubahan' : 'transaksi'} ini membuatnya kurang ${idr(hit.shortage)}. Kalau uangnya memang sudah ada, catat dulu pemasukan atau setor modal bertanggal sebelum itu, atau ubah tanggal/jumlah saldo awal di Jurnal Umum.`;
+  return new HttpError(400, message, 'INSUFFICIENT_FUNDS', { wallet: name, date: hit.date, shortage: hit.shortage, available: have });
+}
+
+// Dipanggil SETELAH perubahan ditulis, di dalam transaksi database: kalau melanggar, melempar error
+// dan seluruh perubahan dibatalkan. Dompetnya dikunci dulu (urut id supaya tidak saling menunggu),
+// jadi dua catatan yang masuk bersamaan tidak bisa sama-sama lolos.
+export async function assertNoOverdraft(db, userId, deltas, op) {
+  const risky = walletsAtRisk(deltas);
+  if (!risky.length) return;
+  const ids = risky.map(([id]) => id);
+  await db.all(`SELECT id FROM accounts WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')}) ORDER BY id FOR UPDATE`, userId, ...ids);
+  for (const [id, wallet] of risky) {
+    const hit = firstOverdraft(await dailyNet(db, userId, id), wallet.days, true);
+    if (hit) throw overdraftError(wallet.name, hit, op);
+  }
+}
+
+// Versi pratinjau (belum ditulis, tanpa mengunci): mengembalikan pelanggaran pertama atau null.
+export async function previewOverdraft(db, userId, deltas) {
+  for (const [id, wallet] of walletsAtRisk(deltas)) {
+    const hit = firstOverdraft(await dailyNet(db, userId, id), wallet.days, false);
+    if (hit) return { wallet: wallet.name, date: hit.date, shortage: hit.shortage, available: Math.max(hit.before, 0) };
+  }
+  return null;
+}
+
+// Menghapus catatan beserta barisnya, lalu memastikan saldo dompet tidak jadi minus.
+// Beberapa catatan sekaligus diperiksa SEKALI di akhir (urutan menghapus tidak boleh menentukan hasil).
+// Harus dipanggil di dalam transaksi database.
+async function deleteEntries(db, userId, entryIds) {
+  await lockBook(db, userId);
+  const found = [];
+  for (const id of entryIds) {
+    const entry = await db.get('SELECT id, date FROM entries WHERE id = ? AND user_id = ?', id, userId);
+    if (entry) found.push({ ...entry, lines: await db.all(OLD_LINES, id) });
+  }
+  await lockWallets(db, userId, found.flatMap((e) => e.lines.filter((l) => l.cash).map((l) => l.accountId)));
+  const deltas = new Map();
+  for (const entry of found) {
+    for (const line of entry.lines) addCash(deltas, line, entry.date, -1);
+    await db.run('DELETE FROM entries WHERE id = ?', entry.id);
+  }
+  await assertNoOverdraft(db, userId, deltas, 'delete');
+}
+
+// ── Urutan kunci database ──
+// Semua jalur yang menulis catatan mengunci dalam urutan YANG SAMA: (1) pembukuan, (2) dompet yang berkurang,
+// (3) utang. Urutan seragam mencegah dua permintaan saling menunggu (deadlock).
+// Dompet harus dikunci SEBELUM menulis baris yang merujuk ke dompet itu: menulis baris saja sudah menahan
+// kunci bersama (FOR KEY SHARE) pada dompet, dan dua transaksi yang sama-sama memegangnya lalu meminta
+// FOR UPDATE akan saling menunggu selamanya.
+// Jurnal manual memakai kunci penuh pembukuan karena menyinkronkan utang; yang lain cukup kunci bersama.
+export const lockBook = (db, userId, exclusive = false) => db.get(`SELECT id FROM users WHERE id = ? FOR ${exclusive ? 'UPDATE' : 'KEY SHARE'}`, userId);
+
+export async function lockWallets(db, userId, ids) {
+  const list = [...new Set(ids)].sort((a, b) => a - b);
+  if (list.length) await db.all(`SELECT id FROM accounts WHERE user_id = ? AND id IN (${list.map(() => '?').join(',')}) ORDER BY id FOR UPDATE`, userId, ...list);
+}
+
 // createdBy = id orang yang mencatat (bukan pemilik pembukuan, kalau pembukuannya dibagi).
 // dueDate dipakai kalau jurnal manual ini mencatat utang/piutang.
 export async function createEntry(db, userId, { date, description, kind, contactId, lines, dueDate, createdBy }) {
@@ -240,11 +376,18 @@ export async function createEntry(db, userId, { date, description, kind, contact
   const clean = await cleanLines(db, userId, lines);
   const contact = await checkContact(db, userId, contactId);
   return db.tx(async () => {
+    await lockBook(db, userId, JOURNAL_KINDS.includes(kind));
+    // Semua dompet yang disentuh dikunci (bukan hanya yang berkurang): menulis baris ke dompet yang sedang dikunci
+    // transaksi lain ikut menunggu, jadi transfer berlawanan arah (Kas→Bank dan Bank→Kas) bisa saling mengunci.
+    await lockWallets(db, userId, clean.lines.filter((l) => l.cash).map((l) => l.accountId));
     const id = await db.insert(
       'INSERT INTO entries (user_id, date, description, kind, amount, contact_id, created_at, created_by) VALUES (?,?,?,?,?,?,?,?)',
       userId, d, desc, kind, clean.amount, contact, nowIso(), createdBy ?? null,
     );
     for (const [i, l] of clean.lines.entries()) await db.run('INSERT INTO lines (entry_id, account_id, debit, credit, position) VALUES (?,?,?,?,?)', id, l.accountId, l.debit, l.credit, i);
+    const deltas = new Map();
+    for (const l of clean.lines) addCash(deltas, l, d);
+    await assertNoOverdraft(db, userId, deltas, 'create');
     if (JOURNAL_KINDS.includes(kind)) await syncJournalDebts(db, userId, id, { dueDate });
     return id;
   });
@@ -264,9 +407,16 @@ export async function updateEntry(db, userId, id, { date, description, contactId
   const clean = await cleanLines(db, userId, lines);
   const contact = await checkContact(db, userId, contactId);
   await db.tx(async () => {
+    await lockBook(db, userId, JOURNAL_KINDS.includes(entry.kind));
+    const oldLines = await db.all(OLD_LINES, entry.id);
+    await lockWallets(db, userId, [...oldLines, ...clean.lines].filter((l) => l.cash).map((l) => l.accountId));
     await db.run('UPDATE entries SET date = ?, description = ?, amount = ?, contact_id = ? WHERE id = ?', d, desc, clean.amount, contact, entry.id);
     await db.run('DELETE FROM lines WHERE entry_id = ?', entry.id);
     for (const [i, l] of clean.lines.entries()) await db.run('INSERT INTO lines (entry_id, account_id, debit, credit, position) VALUES (?,?,?,?,?)', entry.id, l.accountId, l.debit, l.credit, i);
+    const deltas = new Map();
+    for (const l of oldLines) addCash(deltas, l, entry.date, -1);
+    for (const l of clean.lines) addCash(deltas, l, d);
+    await assertNoOverdraft(db, userId, deltas, 'update');
     if (JOURNAL_KINDS.includes(entry.kind)) await syncJournalDebts(db, userId, entry.id, { dueDate });
   });
 }
@@ -278,16 +428,17 @@ export async function deleteEntry(db, userId, id) {
   }
   if (JOURNAL_KINDS.includes(entry.kind)) {
     await db.tx(async () => {
+      await lockBook(db, userId, true);
       const accounts = await journalDebtAccounts(db, entry.id);
       const paid = await db.get('SELECT COUNT(*) AS n FROM debts d JOIN debt_payments p ON p.debt_id = d.id WHERE d.entry_id = ?', entry.id);
       if (paid.n > 0) throw bad('Jurnal ini mencatat utang/piutang yang sudah ada pembayarannya. Hapus dulu pembayarannya (di menu Utang & Piutang, atau jurnal pembayarannya di Jurnal Umum).');
-      await db.run('DELETE FROM entries WHERE id = ?', entry.id);
+      await deleteEntries(db, userId, [entry.id]);
       // Pembayaran jurnal lain yang tadinya tidak punya pasangan mungkin sekarang bisa dicocokkan.
       for (const accountId of accounts) await allocateUnmatched(db, userId, accountId);
     });
     return;
   }
-  await db.run('DELETE FROM entries WHERE id = ?', entry.id);
+  await db.tx(() => deleteEntries(db, userId, [entry.id]));
 }
 
 async function attachLines(db, entries) {
@@ -635,6 +786,7 @@ export async function createDebt(db, userId, body, createdBy) {
   }
 
   return await db.tx(async () => {
+    await lockBook(db, userId); // pembukuan dulu, sebelum menulis apa pun (urutan kunci seragam)
     let contactId = await checkContact(db, userId, body.contactId);
     if (!contactId && newName) {
       const existing = await db.get('SELECT id FROM contacts WHERE user_id = ? AND lower(name) = lower(?)', userId, newName);
@@ -659,6 +811,10 @@ export async function payDebt(db, userId, id, body, createdBy) {
   const date = v.date(body.date);
   await getDebt(db, userId, id); // pastikan milik pengguna ini sebelum mengunci
   return db.tx(async () => {
+    // Urutan kunci: pembukuan, dompet, baru utangnya (sama dengan jalur lain, supaya tidak saling menunggu).
+    await lockBook(db, userId);
+    const walletId = Number(body.cashAccountId);
+    if (Number.isInteger(walletId) && walletId > 0) await lockWallets(db, userId, [walletId]);
     // Kunci baris utangnya, supaya dua pelunasan yang masuk bersamaan tidak
     // sama-sama lolos pemeriksaan sisa dan membuat total bayar melebihi utang.
     await db.get('SELECT id FROM debts WHERE id = ? FOR UPDATE', v.id(id));
@@ -683,8 +839,8 @@ export async function removeDebt(db, userId, debt) {
     // Hanya catatan pelunasan dari menu yang ikut dihapus. Jurnal manual yang kebetulan melunasi
     // utang ini tidak disentuh (jurnalnya tetap milik pengguna).
     const payments = await db.all("SELECT p.entry_id FROM debt_payments p JOIN entries e ON e.id = p.entry_id WHERE p.debt_id = ? AND e.kind = 'debt_payment'", debt.id);
-    for (const p of payments) await db.run('DELETE FROM entries WHERE id = ?', p.entry_id);
-    await db.run('DELETE FROM entries WHERE id = ?', debt.entry_id); // ikut menghapus catatan utangnya
+    // Pelunasan dan catatan utangnya dihapus bersama, lalu saldo dompet diperiksa sekali.
+    await deleteEntries(db, userId, [...payments.map((p) => p.entry_id), debt.entry_id]);
     await allocateUnmatched(db, userId, debt.account_id);
   });
 }
@@ -701,7 +857,7 @@ export async function deleteDebtPayment(db, userId, debtId, paymentId) {
   const pay = await db.get('SELECT p.*, e.kind AS entry_kind FROM debt_payments p JOIN entries e ON e.id = p.entry_id WHERE p.id = ? AND p.debt_id = ?', v.id(paymentId), debt.id);
   if (!pay) throw notFound('Pembayaran tidak ditemukan.');
   if (pay.entry_kind !== 'debt_payment') throw bad('Pembayaran ini berasal dari jurnal manual. Ubah atau hapus jurnalnya di menu Jurnal Umum.');
-  await db.run('DELETE FROM entries WHERE id = ?', pay.entry_id);
+  await db.tx(() => deleteEntries(db, userId, [pay.entry_id]));
 }
 
 // ───────────────────────────── Anggaran ─────────────────────────────

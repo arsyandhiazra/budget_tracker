@@ -67,9 +67,10 @@ await db.tx(async () => {
   await acc.createEntry(db, userId, {
     date: day(months[0], 1), description: "Saldo awal", kind: "opening",
     lines: [
-      { accountId: A.Kas, debit: 3_000_000, credit: 0 },
-      { accountId: A.Bank, debit: 12_000_000, credit: 0 },
-      { accountId: A.Modal, debit: 0, credit: 15_000_000 },
+      // Cukup besar supaya semua pengeluaran contoh di bawah tidak membuat saldo dompet minus.
+      { accountId: A.Kas, debit: 8_000_000, credit: 0 },
+      { accountId: A.Bank, debit: 15_000_000, credit: 0 },
+      { accountId: A.Modal, debit: 0, credit: 23_000_000 },
     ],
   });
 

@@ -124,6 +124,9 @@ export async function createInvoice(db, userId, body, createdBy) {
   const input = readInput(body);
   const categoryId = v.id(body.categoryId, 'Kategori pendapatan');
   return db.tx(async () => {
+    // Kunci penuh pembukuan sejak awal: faktur dibuat satu per satu, jadi nomor otomatis tidak bisa kembar
+    // dan dua faktur tidak saling menunggu di indeks nomor.
+    await acc.lockBook(db, userId, true);
     const number = input.number ?? await nextInvoiceNumber(db, userId, input.issueDate);
     await assertNumberFree(db, userId, number);
     const customer = await resolveCustomer(db, userId, input);
@@ -209,6 +212,7 @@ export async function updateInvoice(db, userId, id, body) {
   const input = readInput(body);
   const categoryId = v.id(body.categoryId, 'Kategori pendapatan');
   await db.tx(async () => {
+    await acc.lockBook(db, userId); // urutan kunci seragam: pembukuan dulu, baru piutangnya
     const debt = await debtOf(db, inv);
     // Kunci piutangnya lalu cek ulang, supaya pembayaran yang masuk bersamaan tidak terlewat.
     await db.get('SELECT id FROM debts WHERE id = ? FOR UPDATE', debt.id);

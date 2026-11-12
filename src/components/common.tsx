@@ -82,6 +82,14 @@ export function TransactionForm({ open, onClose, onSaved, edit, defaultKind = "e
   const categories = all.filter((a) => a.type === (kind === "income" ? "income" : "expense") && usable(a, categoryId));
   const needsCategory = kind === "income" || kind === "expense";
 
+  // Uang yang keluar dari dompet tidak boleh melebihi saldonya. Pengecekan di sini hanya peringatan dini
+  // (saldo sekarang); server tetap yang memutuskan, termasuk per tanggal.
+  const spends = kind === "expense" || kind === "transfer" || kind === "drawing";
+  const wallet = wallets.find((a) => String(a.id) === cashId);
+  const spentBefore = edit && edit.cashAccount && String(edit.cashAccount.id) === cashId && (edit.kind === "expense" || edit.kind === "transfer" || edit.kind === "drawing") ? edit.amount : 0;
+  const available = wallet ? wallet.balance + spentBefore : 0;
+  const overspend = Boolean(spends && wallet && amount > available);
+
   // Dompet pertama dipilih otomatis supaya pengisian lebih cepat.
   useEffect(() => {
     if (open && !cashId && wallets.length) setCashId(String(wallets[0].id));
@@ -90,6 +98,7 @@ export function TransactionForm({ open, onClose, onSaved, edit, defaultKind = "e
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!amount) return setError("Jumlah belum diisi.");
+    if (overspend) return setError(`Saldo ${wallet!.name} tidak cukup. Tersedia ${rp(available)}, sedangkan jumlahnya ${rp(amount)}.`);
     if (needsCategory && !categoryId) return setError("Pilih kategorinya dulu.");
     if (kind === "transfer" && !toId) return setError("Pilih dompet tujuan.");
     const category = all.find((a) => String(a.id) === categoryId);
@@ -180,7 +189,11 @@ export function TransactionForm({ open, onClose, onSaved, edit, defaultKind = "e
           </Field>
         )}
         <div className={cn("grid grid-cols-1 gap-4", kind === "transfer" && "sm:grid-cols-2")}>
-          <Field label={kind === "transfer" ? "Dari dompet" : kind === "income" || kind === "capital_in" ? "Masuk ke dompet" : "Dibayar dari dompet"}>
+          <Field
+            label={kind === "transfer" ? "Dari dompet" : kind === "income" || kind === "capital_in" ? "Masuk ke dompet" : "Dibayar dari dompet"}
+            error={overspend ? `Saldo tidak cukup. Tersedia ${rp(available)}.` : null}
+            hint={spends && wallet ? `Saldo tersedia ${rp(available)}` : undefined}
+          >
             {(id) => (
               <Select id={id} value={cashId} onChange={(e) => setCashId(e.target.value)} required>
                 {wallets.map((a) => (

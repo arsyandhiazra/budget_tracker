@@ -64,9 +64,15 @@ function DebtForm({ open, kind: initialKind, onClose, onSaved }: { open: boolean
     if (open && !cashId && wallets.length) setCashId(String(wallets[0].id));
   }, [open, cashId, wallets]);
 
+  // Meminjamkan uang = uang keluar dari dompet: tidak boleh melebihi saldo.
+  const lending = kind === "receivable" && mode === "cash";
+  const lendWallet = wallets.find((a) => String(a.id) === cashId);
+  const overLend = Boolean(lending && lendWallet && amount > lendWallet.balance);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!amount) return setError("Jumlah belum diisi.");
+    if (overLend) return setError(`Saldo ${lendWallet!.name} tidak cukup. Tersedia ${rp(lendWallet!.balance)}.`);
     if (mode === "credit" && !categoryId) return setError("Pilih kategorinya dulu.");
     if (contact === "__new" && !contactName.trim()) return setError("Nama kontak belum diisi.");
     const title = MODES[kind].find((m) => m.value === mode)!.title;
@@ -160,7 +166,7 @@ function DebtForm({ open, kind: initialKind, onClose, onSaved }: { open: boolean
           </Field>
         </div>
         {mode === "cash" ? (
-          <Field label={kind === "payable" ? "Uang masuk ke dompet" : "Uang keluar dari dompet"}>
+          <Field label={kind === "payable" ? "Uang masuk ke dompet" : "Uang keluar dari dompet"} error={overLend ? `Saldo tidak cukup. Tersedia ${rp(lendWallet!.balance)}.` : null}>
             {(id) => (
               <Select id={id} value={cashId} onChange={(e) => setCashId(e.target.value)}>
                 {wallets.map((a) => (
@@ -215,10 +221,14 @@ function PayForm({ debt, onClose, onSaved }: { debt: Debt | null; onClose: () =>
 
   if (!debt) return null;
   const payable = debt.kind === "payable";
+  // Membayar utang = uang keluar dari dompet: tidak boleh melebihi saldo.
+  const payWallet = wallets.find((a) => String(a.id) === cashId);
+  const overPay = Boolean(payable && payWallet && amount > payWallet.balance);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!amount) return setError("Jumlah belum diisi.");
+    if (overPay) return setError(`Saldo ${payWallet!.name} tidak cukup. Tersedia ${rp(payWallet!.balance)}.`);
     setBusy(true);
     setError(null);
     try {
@@ -257,7 +267,7 @@ function PayForm({ debt, onClose, onSaved }: { debt: Debt | null; onClose: () =>
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Tanggal">{(id) => <Input id={id} type="date" value={date} min={debt.date} onChange={(e) => setDate(e.target.value)} required />}</Field>
-          <Field label={payable ? "Dibayar dari dompet" : "Masuk ke dompet"}>
+          <Field label={payable ? "Dibayar dari dompet" : "Masuk ke dompet"} error={overPay ? `Saldo tidak cukup. Tersedia ${rp(payWallet!.balance)}.` : null}>
             {(id) => (
               <Select id={id} value={cashId} onChange={(e) => setCashId(e.target.value)}>
                 {wallets.map((a) => (
@@ -390,7 +400,7 @@ export function DebtsPage() {
                         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
                           <div className="min-w-0 flex-1">
                             <p className="flex flex-wrap items-center gap-2 font-bold">
-                              {d.contact?.name ?? "Tanpa nama"}
+                              <span className="min-w-0 wrap-anywhere">{d.contact?.name ?? "Tanpa nama"}</span>
                               {d.source === "journal" && (
                                 <a href="#/jurnal" title="Dicatat lewat jurnal manual. Ubah di Jurnal Umum.">
                                   <Badge tone="neutral">
@@ -412,7 +422,7 @@ export function DebtsPage() {
                                 </Badge>
                               )}
                             </p>
-                            <p className="mt-0.5 text-sm text-ink-soft">{d.description}</p>
+                            <p className="mt-0.5 text-sm wrap-anywhere text-ink-soft">{d.description}</p>
                             <p className="mt-1 text-[13px] text-muted">
                               Dicatat {fmtDate(d.date)} · {d.dueDate ? `jatuh tempo ${fmtDate(d.dueDate)}` : "tanpa jatuh tempo"}
                             </p>

@@ -12,13 +12,40 @@ import { Badge, Button, Card, ErrorBox, Field, PageHeader, Select, th, td, useFe
 
 type Row = { row: number; status: "ok" | "error" | "duplicate"; message: string; date: string | null; kind: "income" | "expense" | null; amount: number; category: string; wallet: string; description: string; newCategory: boolean };
 type Preview = {
-  summary: { total: number; ok: number; errors: number; duplicates: number; income: number; expense: number; from: string | null; to: string | null; newCategories: { name: string; type: string }[] };
+  summary: {
+    total: number; ok: number; errors: number; duplicates: number; income: number; expense: number; from: string | null; to: string | null;
+    newCategories: { name: string; type: string }[];
+    /** Kalau diimpor, saldo dompet ini jadi minus pada tanggal tersebut. */
+    overdraft: { wallet: string; date: string; shortage: number; available: number } | null;
+  };
   rows: Row[];
   truncated: boolean;
 };
 type Done = { imported: number; duplicatesSkipped: number; errorsSkipped: number; categoriesCreated: string[] };
 
 const STEPS = ["Siapkan file", "Periksa pratinjau", "Selesai"];
+
+function RowStatus({ r }: { r: Row }) {
+  if (r.status === "ok") {
+    return (
+      <span className="inline-flex items-center gap-1 text-good">
+        <CircleCheck className="h-3.5 w-3.5" aria-hidden /> Siap
+      </span>
+    );
+  }
+  if (r.status === "duplicate") {
+    return (
+      <span className="inline-flex items-start gap-1 text-warn">
+        <Copy className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> {r.message}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-start gap-1 text-bad">
+      <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> {r.message}
+    </span>
+  );
+}
 
 export function ImportPage() {
   const { canWrite } = useBook();
@@ -102,6 +129,7 @@ export function ImportPage() {
   const s = preview?.summary;
   const importable = s ? s.ok + (includeDuplicates ? s.duplicates : 0) : 0;
   const blocked = Boolean(s && s.errors > 0 && !skipErrors);
+  const overdraft = s?.overdraft ?? null;
   const step = done ? 2 : preview || loading ? 1 : 0;
 
   if (!canWrite) {
@@ -243,7 +271,33 @@ export function ImportPage() {
                 </p>
               )}
 
-              <div className="max-h-[28rem] overflow-auto">
+              {/* HP: satu kartu per baris. Tabel enam kolom tidak muat di layar sempit. */}
+              <ul className="max-h-[28rem] divide-y divide-line overflow-auto md:hidden">
+                {preview.rows.map((r) => (
+                  <li key={r.row} className={cn("px-4 py-3 text-sm", r.status === "error" && "bg-bad-soft/40", r.status === "duplicate" && "bg-warn-soft/40")}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="tnum text-xs text-muted">
+                          Baris {r.row} · {r.date ? fmtDate(r.date) : "-"}
+                        </p>
+                        <p className="font-semibold break-words">{r.description || "-"}</p>
+                      </div>
+                      <p className={cn("tnum shrink-0 font-semibold whitespace-nowrap", r.kind === "income" ? "text-masuk-ink" : r.kind === "expense" ? "text-keluar-ink" : "")}>
+                        {r.kind === "income" ? "+" : r.kind === "expense" ? "-" : ""}
+                        {r.amount ? rp(r.amount) : "-"}
+                      </p>
+                    </div>
+                    <p className="mt-0.5 text-[13px] text-muted">
+                      {r.category || "-"} · {r.wallet || "-"}
+                      {r.newCategory && <Badge tone="neutral" className="ml-1.5">baru</Badge>}
+                    </p>
+                    <p className="mt-1 text-[13px]">
+                      <RowStatus r={r} />
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <div className="hidden max-h-[28rem] overflow-auto md:block">
                 <table className="w-full min-w-[44rem]">
                   <thead className="sticky top-0 bg-white">
                     <tr className="border-b border-line">
@@ -270,21 +324,7 @@ export function ImportPage() {
                           {r.amount ? rp(r.amount) : "-"}
                         </td>
                         <td className={`${td} text-[13px]`}>
-                          {r.status === "ok" && (
-                            <span className="inline-flex items-center gap-1 text-good">
-                              <CircleCheck className="h-3.5 w-3.5" aria-hidden /> Siap
-                            </span>
-                          )}
-                          {r.status === "duplicate" && (
-                            <span className="inline-flex items-start gap-1 text-warn">
-                              <Copy className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> {r.message}
-                            </span>
-                          )}
-                          {r.status === "error" && (
-                            <span className="inline-flex items-start gap-1 text-bad">
-                              <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden /> {r.message}
-                            </span>
-                          )}
+                          <RowStatus r={r} />
                         </td>
                       </tr>
                     ))}
@@ -294,6 +334,14 @@ export function ImportPage() {
               {preview.truncated && <p className="border-t border-line px-5 py-3 text-[13px] text-muted">Hanya sebagian baris yang ditampilkan. Semua baris tetap diperiksa dan diimpor.</p>}
 
               <div className="space-y-3 border-t border-line px-5 py-4">
+                {overdraft && (
+                  <p className="flex gap-2.5 rounded-2xl border border-bad/30 bg-bad-soft px-4 py-3 text-[13px] text-bad" role="alert">
+                    <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <span>
+                      Impor ini membuat saldo <strong>{overdraft.wallet}</strong> minus pada {fmtDate(overdraft.date)} (kurang {rp(overdraft.shortage)}), jadi ditolak. Catat saldo awal atau pemasukan lebih dulu (bertanggal sebelum itu), atau keluarkan baris pengeluarannya dari file.
+                    </span>
+                  </p>
+                )}
                 {s.errors > 0 && (
                   <label className="flex items-start gap-2 text-sm">
                     <input type="checkbox" checked={skipErrors} onChange={(e) => setSkipErrors(e.target.checked)} className="mt-0.5 h-4 w-4 accent-ink" />
@@ -317,7 +365,7 @@ export function ImportPage() {
                   <Button variant="secondary" onClick={reset}>
                     Batal
                   </Button>
-                  <Button onClick={commit} loading={saving} disabled={blocked || importable === 0}>
+                  <Button onClick={commit} loading={saving} disabled={blocked || importable === 0 || Boolean(overdraft)}>
                     Impor {num(importable)} transaksi
                   </Button>
                 </div>

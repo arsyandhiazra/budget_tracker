@@ -395,7 +395,7 @@ export async function openDb(options = {}) {
     // semuanya dibatalkan. Ini yang menjaga jurnal tidak pernah "setengah tersimpan".
     tx(fn) {
       if (scope.getStore()) return fn(); // sudah di dalam paket
-      return driver.transaction((conn) => scope.run(conn, fn));
+      return withRetry(() => driver.transaction((conn) => scope.run(conn, fn)));
     },
     close: () => driver.close(),
   };
@@ -407,6 +407,22 @@ export async function openDb(options = {}) {
     throw err;
   }
   return db;
+}
+
+// Dua permintaan yang kebetulan saling mengunci (deadlock) atau bentrok diulang otomatis beberapa kali.
+// Isi sebuah paket (tx) hanya berupa perintah database, jadi aman diulang dari awal.
+async function withRetry(run) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (err) {
+      if ((err?.code === '40P01' || err?.code === '40001') && attempt < 3) {
+        await new Promise((r) => setTimeout(r, 20 * (attempt + 1) + Math.random() * 30));
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 async function migrate(db) {
