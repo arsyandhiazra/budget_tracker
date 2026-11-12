@@ -55,6 +55,7 @@ export function loadConfig(overrides = {}) {
     port,
     host: env.HOST || (production ? '0.0.0.0' : '127.0.0.1'),
     appUrl: (env.APP_URL || `http://localhost:${port}`).replace(/\/+$/, ''),
+    appUrlExplicit: Boolean(env.APP_URL),
     // Alamat database Postgres. Neon/Vercel mengisinya sebagai DATABASE_URL atau POSTGRES_URL.
     // Kosong = (hanya di laptop) database lokal PGlite di folder data/pglite.
     databaseUrl: String(env.DATABASE_URL || env.POSTGRES_URL || '').trim(),

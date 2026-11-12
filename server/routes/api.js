@@ -1,6 +1,6 @@
 // Semua alamat (endpoint) untuk fitur pembukuan. Setiap permintaan sudah pasti
 // dari pengguna yang login (dicek di app.js), dan semua data selalu disaring
-// berdasarkan pemilik akunnya (req.user.id) supaya data antar pengguna tidak tercampur.
+// berdasarkan pembukuannya (req.book.id = id pemilik) supaya data antar pembukuan tidak tercampur.
 import express from 'express';
 import { bad, notFound, v, range, todayIn } from '../http.js';
 import { nowIso } from '../db.js';
@@ -10,9 +10,11 @@ import { reportSheet, REPORT_NAMES } from '../report-sheets.js';
 
 const CONTACT_TYPES = ['customer', 'supplier', 'employee', 'other'];
 
-export function createApi({ db, config }) {
+export function createApi({ db, config, requireOwner }) {
   const router = express.Router();
-  const uid = (req) => req.user.id;
+  // Semua data disaring per pembukuan (id pemilik), bukan per orang yang masuk. Dengan begitu
+  // anggota yang diundang bekerja di data yang sama dengan pemiliknya.
+  const uid = (req) => req.book.id;
   const today = (req) => (req.query.today && /^\d{4}-\d{2}-\d{2}$/.test(req.query.today) ? v.date(req.query.today) : todayIn(config.timezone));
 
   // ── Daftar akun (kategori, dompet, dll.) ──
@@ -39,7 +41,7 @@ export function createApi({ db, config }) {
 
   router.post('/transactions', async (req, res) => {
     const lines = await acc.simpleLines(db, uid(req), req.body);
-    const id = await acc.createEntry(db, uid(req), { date: req.body.date, description: req.body.description, kind: req.body.kind, contactId: req.body.contactId, lines });
+    const id = await acc.createEntry(db, uid(req), { date: req.body.date, description: req.body.description, kind: req.body.kind, contactId: req.body.contactId, lines, createdBy: req.user.id });
     res.status(201).json({ id });
   });
 
@@ -56,12 +58,13 @@ export function createApi({ db, config }) {
   router.delete('/entries/:id', async (req, res) => { await acc.deleteEntry(db, uid(req), req.params.id); res.json({ ok: true }); });
 
   // ── Jurnal umum manual (untuk yang paham debit-kredit) ──
+  const dueDateOf = (body) => ('dueDate' in body ? v.date(body.dueDate || null, 'Jatuh tempo', { optional: true }) : undefined);
   router.post('/journal', async (req, res) => {
-    const id = await acc.createEntry(db, uid(req), { date: req.body.date, description: req.body.description, kind: 'manual', contactId: req.body.contactId, lines: req.body.lines });
+    const id = await acc.createEntry(db, uid(req), { date: req.body.date, description: req.body.description, kind: 'manual', contactId: req.body.contactId, lines: req.body.lines, dueDate: dueDateOf(req.body), createdBy: req.user.id });
     res.status(201).json({ id });
   });
   router.patch('/journal/:id', async (req, res) => {
-    await acc.updateEntry(db, uid(req), req.params.id, req.body, ['manual', 'opening']);
+    await acc.updateEntry(db, uid(req), req.params.id, { ...req.body, dueDate: dueDateOf(req.body) }, ['manual', 'opening']);
     res.json({ ok: true });
   });
 
@@ -118,10 +121,17 @@ export function createApi({ db, config }) {
   router.get('/debts', async (req, res) => {
     const kind = req.query.kind ? v.oneOf(req.query.kind, ['payable', 'receivable'], 'Jenis') : undefined;
     const status = req.query.status ? v.oneOf(req.query.status, ['open', 'paid', 'all'], 'Status') : 'all';
-    res.json({ debts: await acc.listDebts(db, uid(req), { today: today(req), kind, status }), totals: await acc.debtTotals(db, uid(req)) });
+    const totals = await acc.debtTotals(db, uid(req));
+    const ledger = await acc.debtLedger(db, uid(req));
+    res.json({
+      debts: await acc.listDebts(db, uid(req), { today: today(req), kind, status }),
+      totals,
+      // Selisih antara saldo di Neraca dan jumlah di daftar ini (0 = cocok).
+      unlinked: { payable: ledger.payable - totals.payable, receivable: ledger.receivable - totals.receivable },
+    });
   });
-  router.post('/debts', async (req, res) => res.status(201).json({ id: await acc.createDebt(db, uid(req), req.body) }));
-  router.post('/debts/:id/payments', async (req, res) => res.status(201).json({ id: await acc.payDebt(db, uid(req), req.params.id, req.body) }));
+  router.post('/debts', async (req, res) => res.status(201).json({ id: await acc.createDebt(db, uid(req), req.body, req.user.id) }));
+  router.post('/debts/:id/payments', async (req, res) => res.status(201).json({ id: await acc.payDebt(db, uid(req), req.params.id, req.body, req.user.id) }));
   router.delete('/debts/:id', async (req, res) => { await acc.deleteDebt(db, uid(req), req.params.id); res.json({ ok: true }); });
   router.delete('/debts/:id/payments/:paymentId', async (req, res) => { await acc.deleteDebtPayment(db, uid(req), req.params.id, req.params.paymentId); res.json({ ok: true }); });
 
@@ -165,7 +175,7 @@ export function createApi({ db, config }) {
   router.get('/reports/:name/export', async (req, res) => {
     const name = req.params.name;
     if (!REPORT_NAMES[name]) throw notFound('Laporan tidak ditemukan.');
-    const sheet = reportSheet(name, await buildReport(name, req), { owner: req.user.business_name || req.user.name });
+    const sheet = reportSheet(name, await buildReport(name, req), { owner: req.book.name || req.book.ownerName });
     const file = buildXlsx(sheet);
     const stamp = (req.query.to || today(req)).replace(/[^0-9-]/g, '');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -174,11 +184,11 @@ export function createApi({ db, config }) {
   });
 
   // ── Cadangan data (unduh semua data milik sendiri) ──
-  router.get('/backup', async (req, res) => {
+  router.get('/backup', requireOwner, async (req, res) => {
     const id = uid(req);
     const data = {
       exportedAt: nowIso(),
-      profile: { name: req.user.name, email: req.user.email, businessName: req.user.business_name, usage: req.user.usage },
+      profile: { name: req.user.name, email: req.user.email, businessName: req.book.name, usage: req.book.usage },
       accounts: await db.all('SELECT id, code, name, type, subtype, archived FROM accounts WHERE user_id = ? ORDER BY code', id),
       contacts: await db.all('SELECT id, name, type, email, phone, note FROM contacts WHERE user_id = ?', id),
       entries: (await acc.listEntries(db, id, { limit: 100000, order: 'ASC' })).items,

@@ -4,7 +4,7 @@ import express from 'express';
 import { HttpError, bad, v } from '../http.js';
 import { nowIso } from '../db.js';
 import { hashPassword, verifyPassword, fakePasswordCheck, sha256, newToken, newCode, safeEqual, parseCookies } from '../security.js';
-import { codeEmail } from '../mailer.js';
+import { codeEmail, emailChangedEmail } from '../mailer.js';
 import { seedAccounts, createEntry, roleAccount } from '../accounting.js';
 
 export const COOKIE = 'bt_session';
@@ -12,15 +12,37 @@ const CODE_MINUTES = 15;
 const RESEND_SECONDS = 60;
 const MAX_CODE_TRIES = 5;
 
-export const publicUser = (u) => ({
+// "Pembukuan" (book) = sekumpulan data milik satu pemilik. id-nya selalu id si pemilik.
+// role: 'owner' (pemilik), 'editor' (pencatat: boleh mencatat), 'viewer' (pelihat: hanya melihat).
+const bookOf = (owner, role) => ({
+  id: owner.id,
+  role,
+  name: owner.business_name,
+  usage: owner.usage,
+  onboarded: Boolean(owner.onboarded_at),
+  ownerName: owner.name,
+  address: owner.business_address,
+  phone: owner.business_phone,
+  paymentInfo: owner.payment_info,
+});
+export const ownBookOf = (u) => bookOf(u, 'owner');
+
+// Yang dikirim ke tampilan. businessName/usage/onboarded mengikuti pembukuan yang sedang dibuka.
+export const publicUser = (u, book = ownBookOf(u)) => ({
   id: u.id,
   name: u.name,
   email: u.email,
-  businessName: u.business_name,
-  usage: u.usage,
-  onboarded: Boolean(u.onboarded_at),
+  businessName: book.name,
+  usage: book.usage,
+  onboarded: book.onboarded,
+  role: book.role,
+  bookId: book.id,
   createdAt: u.created_at,
 });
+
+const INVITE_DAYS = 14;
+
+export { INVITE_DAYS };
 
 export function createAuth({ db, config, mailer, limiter }) {
   const router = express.Router();
@@ -40,31 +62,86 @@ export function createAuth({ db, config, mailer, limiter }) {
     return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
   }
 
+  // Mengembalikan pembukuan yang dibuka sesi ini. Orang yang belum mengatur pembukuan sendiri
+  // tapi sudah diundang ke pembukuan lain langsung dibawa ke pembukuan itu.
   async function startSession(req, res, user) {
     const token = newToken();
     const expires = new Date(Date.now() + config.sessionDays * 86_400_000).toISOString();
-    await db.run('INSERT INTO sessions (user_id, token_hash, expires_at, user_agent, created_at) VALUES (?,?,?,?,?)', user.id, sha256(token), expires, String(req.headers['user-agent'] || '').slice(0, 200), nowIso());
+    let bookId = null;
+    if (!user.onboarded_at) {
+      const first = await db.get('SELECT m.book_id FROM memberships m JOIN users o ON o.id = m.book_id WHERE m.user_id = ? AND o.onboarded_at IS NOT NULL ORDER BY m.created_at LIMIT 1', user.id);
+      bookId = first?.book_id ?? null;
+    }
+    await db.run('INSERT INTO sessions (user_id, token_hash, expires_at, user_agent, created_at, book_id) VALUES (?,?,?,?,?,?)', user.id, sha256(token), expires, String(req.headers['user-agent'] || '').slice(0, 200), nowIso(), bookId);
     await db.run('DELETE FROM sessions WHERE expires_at < ?', nowIso());
     res.setHeader('Set-Cookie', cookieString(req, token, config.sessionDays * 86_400));
+    return resolveBook({ ...user, active_book_id: bookId });
   }
 
   async function currentSession(req) {
     const token = parseCookies(req.headers.cookie)[COOKIE];
     if (!token) return null;
-    const row = await db.get('SELECT s.id AS session_id, s.expires_at, u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?', sha256(token));
+    const row = await db.get('SELECT s.id AS session_id, s.expires_at, s.book_id AS active_book_id, u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?', sha256(token));
     if (!row || row.expires_at < nowIso()) return null;
     return row;
+  }
+
+  // Pembukuan yang aktif untuk sesi ini. Kalau keanggotaannya sudah dicabut, kembali ke pembukuan sendiri.
+  async function resolveBook(row) {
+    if (row.active_book_id && row.active_book_id !== row.id) {
+      const owner = await db.get('SELECT o.*, m.role AS member_role FROM memberships m JOIN users o ON o.id = m.book_id WHERE m.book_id = ? AND m.user_id = ?', row.active_book_id, row.id);
+      if (owner?.onboarded_at) return bookOf(owner, owner.member_role);
+    }
+    return ownBookOf(row);
+  }
+
+  // Isi jawaban "siapa saya": akun, pembukuan yang bisa dibuka, dan undangan yang menunggu.
+  async function sessionPayload(row) {
+    const book = await resolveBook(row);
+    const shared = await db.all(
+      `SELECT o.id, o.name, o.business_name, m.role FROM memberships m JOIN users o ON o.id = m.book_id
+       WHERE m.user_id = ? AND o.onboarded_at IS NOT NULL ORDER BY lower(COALESCE(o.business_name, o.name))`,
+      row.id,
+    );
+    const invites = await db.all(
+      `SELECT i.id, i.role, i.expires_at, o.name AS owner_name, o.business_name
+       FROM invitations i JOIN users o ON o.id = i.book_id
+       WHERE lower(i.email) = lower(?) AND i.expires_at > ? ORDER BY i.created_at DESC`,
+      row.email, nowIso(),
+    );
+    return {
+      user: publicUser(row, book),
+      books: [
+        { id: row.id, name: row.business_name || 'Pembukuan saya', role: 'owner', own: true, ready: Boolean(row.onboarded_at) },
+        ...shared.map((o) => ({ id: o.id, name: o.business_name || `Pembukuan ${o.name}`, ownerName: o.name, role: o.role, own: false, ready: true })),
+      ],
+      invitations: invites.map((i) => ({ id: i.id, role: i.role, bookName: i.business_name || `Pembukuan ${i.owner_name}`, ownerName: i.owner_name, expiresAt: i.expires_at })),
+    };
   }
 
   async function requireAuth(req, _res, next) {
     const user = await currentSession(req);
     if (!user) throw new HttpError(401, 'Sesi kamu sudah habis. Silakan masuk lagi.', 'UNAUTHENTICATED');
-    req.user = user;
+    req.user = user; // orang yang sedang masuk
+    req.book = await resolveBook(user); // pembukuan yang sedang dibuka (bisa milik orang lain)
     next();
   }
 
   function requireOnboarded(req, _res, next) {
-    if (!req.user.onboarded_at) throw new HttpError(409, 'Selesaikan pengaturan awal dulu ya.', 'ONBOARDING_REQUIRED');
+    if (!req.book.onboarded) throw new HttpError(409, 'Selesaikan pengaturan awal dulu ya.', 'ONBOARDING_REQUIRED');
+    next();
+  }
+
+  // Pelihat hanya boleh membaca.
+  function requireWritable(req, _res, next) {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.book.role === 'viewer') {
+      throw new HttpError(403, 'Kamu hanya bisa melihat pembukuan ini, tidak bisa mengubahnya.', 'READ_ONLY');
+    }
+    next();
+  }
+
+  function requireOwner(req, _res, next) {
+    if (req.book.role !== 'owner') throw new HttpError(403, 'Hanya pemilik pembukuan yang bisa melakukan ini.', 'OWNER_ONLY');
     next();
   }
 
@@ -76,13 +153,14 @@ export function createAuth({ db, config, mailer, limiter }) {
     return last ? (Date.now() - Date.parse(last.created_at)) / 1000 : Infinity;
   }
 
-  async function issueCode(user, purpose) {
+  // newEmail: khusus ganti email, kode dikirim ke alamat BARU (membuktikan alamat itu milik orangnya).
+  async function issueCode(user, purpose, { newEmail } = {}) {
     const code = newCode();
     const now = nowIso();
     await db.run('UPDATE email_codes SET used_at = ? WHERE user_id = ? AND purpose = ? AND used_at IS NULL', now, user.id, purpose);
-    await db.run('INSERT INTO email_codes (user_id, purpose, code_hash, expires_at, created_at) VALUES (?,?,?,?,?)', user.id, purpose, codeHash(user, purpose, code), new Date(Date.now() + CODE_MINUTES * 60_000).toISOString(), now);
+    await db.run('INSERT INTO email_codes (user_id, purpose, code_hash, expires_at, created_at, new_email) VALUES (?,?,?,?,?,?)', user.id, purpose, codeHash(user, purpose, code), new Date(Date.now() + CODE_MINUTES * 60_000).toISOString(), now, newEmail ?? null);
     try {
-      await mailer.send({ to: user.email, ...codeEmail({ name: user.name, code, purpose, minutes: CODE_MINUTES }) });
+      await mailer.send({ to: newEmail ?? user.email, ...codeEmail({ name: user.name, code, purpose, minutes: CODE_MINUTES }) });
     } catch (err) {
       console.error('Gagal mengirim email:', err.message);
       throw new HttpError(502, 'Email tidak berhasil dikirim. Coba lagi sebentar lagi.', 'MAIL_FAILED');
@@ -101,6 +179,7 @@ export function createAuth({ db, config, mailer, limiter }) {
       throw new HttpError(400, 'Kode belum cocok. Coba periksa lagi.', 'CODE_WRONG');
     }
     await db.run('UPDATE email_codes SET used_at = ? WHERE id = ?', nowIso(), row.id);
+    return row;
   }
 
   const readCode = (value) => {
@@ -143,8 +222,8 @@ export function createAuth({ db, config, mailer, limiter }) {
     if (user.email_verified_at) throw new HttpError(400, 'Akun ini sudah aktif. Silakan masuk.', 'ALREADY_VERIFIED');
     await consumeCode(user, 'verify', code);
     await db.run('UPDATE users SET email_verified_at = ? WHERE id = ?', nowIso(), user.id);
-    await startSession(req, res, user);
-    res.json({ user: publicUser(await findUser(email)) });
+    const book = await startSession(req, res, user);
+    res.json({ user: publicUser(await findUser(email), book) });
   });
 
   router.post('/resend', async (req, res) => {
@@ -181,8 +260,8 @@ export function createAuth({ db, config, mailer, limiter }) {
       throw new HttpError(403, 'Email kamu belum diverifikasi. Masukkan kode yang kami kirim ke emailmu.', 'EMAIL_NOT_VERIFIED', { email, devCode });
     }
     await limiter.reset(key);
-    await startSession(req, res, user);
-    res.json({ user: publicUser(user) });
+    const book = await startSession(req, res, user);
+    res.json({ user: publicUser(user, book) });
   });
 
   router.post('/logout', async (req, res) => {
@@ -194,7 +273,106 @@ export function createAuth({ db, config, mailer, limiter }) {
 
   router.get('/me', async (req, res) => {
     const user = await currentSession(req);
-    res.json({ user: user ? publicUser(user) : null, mailMode: mailer.configured ? 'smtp' : 'console' });
+    const mailMode = mailer.configured ? 'smtp' : 'console';
+    res.json(user ? { ...(await sessionPayload(user)), mailMode } : { user: null, books: [], invitations: [], mailMode });
+  });
+
+  // ── Pindah pembukuan, undangan, dan keluar dari pembukuan orang lain ──
+  router.post('/book', requireAuth, async (req, res) => {
+    const target = v.id(req.body.bookId, 'Pembukuan');
+    if (target === req.user.id) {
+      await db.run('UPDATE sessions SET book_id = NULL WHERE id = ?', req.user.session_id);
+    } else {
+      const m = await db.get('SELECT 1 AS x FROM memberships m JOIN users o ON o.id = m.book_id WHERE m.book_id = ? AND m.user_id = ? AND o.onboarded_at IS NOT NULL', target, req.user.id);
+      if (!m) throw new HttpError(403, 'Kamu tidak punya akses ke pembukuan itu.', 'FORBIDDEN');
+      await db.run('UPDATE sessions SET book_id = ? WHERE id = ?', target, req.user.session_id);
+    }
+    res.json({ ...(await sessionPayload(await currentSession(req))), mailMode: mailer.configured ? 'smtp' : 'console' });
+  });
+
+  async function myInvitation(req) {
+    const inv = await db.get('SELECT * FROM invitations WHERE id = ?', v.id(req.params.id));
+    // Undangan hanya berlaku untuk pemilik email yang diundang (emailnya sudah diverifikasi saat daftar).
+    if (!inv || inv.email.toLowerCase() !== req.user.email.toLowerCase() || inv.expires_at < nowIso()) {
+      throw new HttpError(404, 'Undangan tidak ditemukan atau sudah kedaluwarsa.', 'NOT_FOUND');
+    }
+    return inv;
+  }
+
+  router.post('/invitations/:id/accept', requireAuth, async (req, res) => {
+    const inv = await myInvitation(req);
+    await db.tx(async () => {
+      await db.run(
+        'INSERT INTO memberships (book_id, user_id, role, invited_by, created_at) VALUES (?,?,?,?,?) ON CONFLICT (book_id, user_id) DO UPDATE SET role = excluded.role',
+        inv.book_id, req.user.id, inv.role, inv.invited_by, nowIso(),
+      );
+      await db.run('DELETE FROM invitations WHERE id = ?', inv.id);
+      await db.run('UPDATE sessions SET book_id = ? WHERE id = ?', inv.book_id, req.user.session_id);
+    });
+    res.json({ ...(await sessionPayload(await currentSession(req))), mailMode: mailer.configured ? 'smtp' : 'console' });
+  });
+
+  router.post('/invitations/:id/decline', requireAuth, async (req, res) => {
+    const inv = await myInvitation(req);
+    await db.run('DELETE FROM invitations WHERE id = ?', inv.id);
+    res.json({ ok: true });
+  });
+
+  // Keluar sendiri dari pembukuan orang lain.
+  router.delete('/books/:id', requireAuth, async (req, res) => {
+    const bookId = v.id(req.params.id);
+    const r = await db.run('DELETE FROM memberships WHERE book_id = ? AND user_id = ?', bookId, req.user.id);
+    if (!r.changes) throw new HttpError(404, 'Kamu bukan anggota pembukuan itu.', 'NOT_FOUND');
+    await db.run('UPDATE sessions SET book_id = NULL WHERE user_id = ? AND book_id = ?', req.user.id, bookId);
+    res.json({ ok: true });
+  });
+
+  // ── Ganti alamat email ──
+  // 1) Masukkan email baru + kata sandi → kode dikirim ke email BARU.
+  // 2) Masukkan kode → email diganti, email lama diberi tahu, perangkat lain keluar.
+  router.post('/email/request', requireAuth, async (req, res) => {
+    await limit(`emailchg:${req.user.id}`, 6, 60 * 60_000);
+    await limit(`emailchg-ip:${clientIp(req)}`, 30, 60 * 60_000);
+    const newEmail = v.email(req.body.email);
+    const password = typeof req.body.password === 'string' ? req.body.password.slice(0, 200) : '';
+    if (!(await verifyPassword(password, req.user.password_hash))) throw new HttpError(400, 'Kata sandi salah.', 'BAD_CREDENTIALS');
+    if (newEmail === req.user.email.toLowerCase()) throw bad('Itu sudah menjadi alamat emailmu sekarang.');
+    const taken = await db.get('SELECT 1 AS x FROM users WHERE lower(email) = ? AND email_verified_at IS NOT NULL AND id != ?', newEmail, req.user.id);
+    if (taken) throw new HttpError(409, 'Alamat email itu sudah dipakai akun lain.', 'EMAIL_TAKEN');
+    const wait = RESEND_SECONDS - await secondsSinceLastCode(req.user, 'email_change');
+    if (wait > 0) throw new HttpError(429, `Tunggu ${Math.ceil(wait)} detik lagi sebelum minta kode baru.`, 'RATE_LIMITED', { retryAfter: Math.ceil(wait) });
+    const devCode = await issueCode(req.user, 'email_change', { newEmail });
+    res.json({ ok: true, email: newEmail, devCode });
+  });
+
+  router.post('/email/confirm', requireAuth, async (req, res) => {
+    await limit(`emailcfm:${req.user.id}`, 20, 10 * 60_000);
+    const code = readCode(req.body.code);
+    const row = await consumeCode(req.user, 'email_change', code);
+    const newEmail = row.new_email;
+    const oldEmail = req.user.email;
+    try {
+      await db.tx(async () => {
+        // Alamat itu mungkin dipegang pendaftar yang tidak pernah memverifikasi. Kamu sudah
+        // membuktikan alamat itu milikmu lewat kode tadi, jadi pendaftaran yang menggantung itu dibuang.
+        await db.run('DELETE FROM users WHERE lower(email) = ? AND email_verified_at IS NULL AND id != ?', newEmail, req.user.id);
+        const taken = await db.get('SELECT 1 AS x FROM users WHERE lower(email) = ? AND id != ?', newEmail, req.user.id);
+        if (taken) throw new HttpError(409, 'Alamat email itu sudah dipakai akun lain.', 'EMAIL_TAKEN');
+        await db.run('UPDATE users SET email = ? WHERE id = ?', newEmail, req.user.id);
+        await db.run('DELETE FROM sessions WHERE user_id = ? AND id != ?', req.user.id, req.user.session_id); // perangkat lain keluar
+      });
+    } catch (err) {
+      if (err?.code === '23505') throw new HttpError(409, 'Alamat email itu sudah dipakai akun lain.', 'EMAIL_TAKEN');
+      throw err;
+    }
+    // Kabari alamat lama (tidak menggagalkan penggantian kalau email gagal terkirim).
+    try {
+      await mailer.send({ to: oldEmail, ...emailChangedEmail({ name: req.user.name, newEmail }) });
+    } catch (err) {
+      console.error('Gagal mengirim pemberitahuan ke email lama:', err.message);
+    }
+    const fresh = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+    res.json({ user: publicUser(fresh, await resolveBook({ ...fresh, active_book_id: req.user.active_book_id })) });
   });
 
   // ── Lupa kata sandi ──
@@ -245,15 +423,22 @@ export function createAuth({ db, config, mailer, limiter }) {
       }
       await db.run('UPDATE users SET usage = ?, business_name = ?, onboarded_at = ? WHERE id = ?', usage, businessName, nowIso(), user.id);
     });
-    res.json({ user: publicUser(await db.get('SELECT * FROM users WHERE id = ?', user.id)) });
+    const fresh = await db.get('SELECT * FROM users WHERE id = ?', user.id);
+    res.json({ user: publicUser(fresh, ownBookOf(fresh)) });
   });
 
   // ── Profil & keamanan akun ──
+  // Nama adalah milik orangnya. Nama pembukuan milik pembukuan, jadi hanya pemilik yang boleh mengubahnya.
   router.patch('/profile', requireAuth, async (req, res) => {
     const name = v.str(req.body.name, 'Nama', { min: 2, max: 80 });
-    const businessName = v.str(req.body.businessName, 'Nama pembukuan', { max: 80, optional: true });
-    await db.run('UPDATE users SET name = ?, business_name = ? WHERE id = ?', name, businessName ?? req.user.business_name, req.user.id);
-    res.json({ user: publicUser(await db.get('SELECT * FROM users WHERE id = ?', req.user.id)) });
+    await db.run('UPDATE users SET name = ? WHERE id = ?', name, req.user.id);
+    if (req.body.businessName !== undefined) {
+      if (req.book.role !== 'owner') throw new HttpError(403, 'Hanya pemilik pembukuan yang bisa mengubah nama pembukuan.', 'OWNER_ONLY');
+      const businessName = v.str(req.body.businessName, 'Nama pembukuan', { max: 80, optional: true });
+      await db.run('UPDATE users SET business_name = ? WHERE id = ?', businessName ?? req.user.business_name, req.user.id);
+    }
+    const fresh = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+    res.json({ user: publicUser(fresh, await resolveBook({ ...fresh, active_book_id: req.user.active_book_id })) });
   });
 
   router.post('/change-password', requireAuth, async (req, res) => {
@@ -271,8 +456,13 @@ export function createAuth({ db, config, mailer, limiter }) {
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
     if (!(await verifyPassword(password, req.user.password_hash))) throw new HttpError(400, 'Kata sandi salah.', 'BAD_CREDENTIALS');
     const id = req.user.id;
+    const shared = (await db.get('SELECT COUNT(*) AS n FROM memberships WHERE book_id = ?', id)).n;
+    if (shared > 0) {
+      throw bad(`Pembukuanmu masih dibagikan ke ${shared} orang. Keluarkan semua anggota dulu di Pengaturan → Anggota, lalu hapus akun.`, 'BOOK_SHARED');
+    }
     await db.tx(async () => {
       await db.run('DELETE FROM entries WHERE user_id = ?', id); // baris jurnal, utang, pembayaran ikut terhapus
+      await db.run('DELETE FROM invoices WHERE user_id = ?', id);
       await db.run('DELETE FROM budgets WHERE user_id = ?', id);
       await db.run('DELETE FROM accounts WHERE user_id = ?', id);
       await db.run('DELETE FROM users WHERE id = ?', id); // sesi, kode, kontak, chat ikut terhapus
@@ -281,5 +471,5 @@ export function createAuth({ db, config, mailer, limiter }) {
     res.json({ ok: true });
   });
 
-  return { router, requireAuth, requireOnboarded };
+  return { router, requireAuth, requireOnboarded, requireWritable, requireOwner };
 }

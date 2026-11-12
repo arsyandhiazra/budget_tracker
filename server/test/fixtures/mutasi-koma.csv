@@ -1,0 +1,8 @@
+Tanggal,Jenis,Jumlah,Kategori,Dompet,Keterangan
+2026-01-05,Pemasukan,3000000,Pendapatan Penjualan,Bank,Penjualan kopi ☕ & roti
+06/01/2026,Pengeluaran,Rp 1.200.000,Sewa,Bank,Sewa kios <bulan Januari>
+2026-01-07,pengeluaran,150000,makan & minum,Kas,"Makan siang tim, ""dengan kutip""
+baris kedua"
+2026-01-08,Pemasukan,500000,,,Setoran tanpa kategori dan dompet
+bukan tanggal,Pengeluaran,10000,Sewa,Kas,Baris yang salah
+2026-01-09,Pengeluaran,75000,Kategori Baru,Kas,Beli sesuatu

@@ -34,7 +34,8 @@ export function createChat({ db, config, limiter, fetchImpl }) {
       if (!r.ok) throw new HttpError(429, 'Kamu mengirim pesan terlalu cepat. Tunggu sebentar ya.', 'RATE_LIMITED', { retryAfter: r.retryAfter });
     }
 
-    const ctx = await buildContext(db, req.user, today);
+    // Pertanyaan milik orang yang bertanya, tetapi angkanya dari pembukuan yang sedang dibuka.
+    const ctx = await buildContext(db, { id: req.book.id, name: req.user.name, business_name: req.book.name, usage: req.book.usage }, today);
     const history = (await db.all('SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT ?', userId, HISTORY_FOR_AI)).reverse();
     await db.run('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?,?,?,?)', userId, 'user', message, nowIso());
 

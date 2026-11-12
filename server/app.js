@@ -7,6 +7,9 @@ import { RateLimiter } from './security.js';
 import { createAuth } from './routes/auth.js';
 import { createApi } from './routes/api.js';
 import { createChat } from './routes/chat.js';
+import { createTeam } from './routes/team.js';
+import { createInvoices } from './routes/invoices.js';
+import { createImport } from './routes/import.js';
 
 export function createApp({ db, config, mailer, fetchImpl = fetch }) {
   const app = express();
@@ -48,8 +51,14 @@ export function createApp({ db, config, mailer, fetchImpl = fetch }) {
   api.get('/health', (_req, res) => res.json({ ok: true }));
   api.use('/auth', auth.router);
   api.use(auth.requireAuth, auth.requireOnboarded);
-  api.use(createApi({ db, config }));
+  // Bertanya ke asisten itu hanya membaca, jadi boleh juga untuk "Pelihat". Rute di bawahnya
+  // menolak perubahan dari Pelihat (requireWritable).
   api.use(createChat({ db, config, limiter, fetchImpl }));
+  api.use(auth.requireWritable);
+  api.use(createTeam({ db, config, mailer, limiter, requireOwner: auth.requireOwner }));
+  api.use(createApi({ db, config, requireOwner: auth.requireOwner }));
+  api.use(createInvoices({ db, config }));
+  api.use(createImport({ db, limiter }));
   api.use((_req, _res) => { throw new HttpError(404, 'Alamat tidak ditemukan.', 'NOT_FOUND'); });
   app.use('/api', api);
 
