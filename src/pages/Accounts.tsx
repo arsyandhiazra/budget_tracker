@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Archive, ArchiveRestore, Pencil, Plus, Trash2 } from "lucide-react";
 import { WriteOnly } from "@/lib/book";
 import { api, errorMessage, useData } from "@/lib/api";
+import { cn } from "@/utils/cn";
 import { rp } from "@/lib/format";
 import { SUBTYPE_LABEL, SUBTYPES, TYPE_LABEL, type Account, type AccountType } from "@/lib/types";
 import { Page } from "@/components/Layout";
@@ -138,6 +139,24 @@ export function AccountsPage() {
     }
   }
 
+  const rowActions = (a: Account) => (
+    <WriteOnly>
+      <Button variant="ghost" size="icon" aria-label={`Ubah ${a.name}`} title="Ubah" onClick={() => setForm({ open: true, edit: a, type: a.type })}>
+        <Pencil className="h-4 w-4" aria-hidden />
+      </Button>
+      {!a.system &&
+        (a.used ? (
+          <Button variant="ghost" size="icon" aria-label={a.archived ? `Aktifkan lagi ${a.name}` : `Arsipkan ${a.name}`} title={a.archived ? "Aktifkan lagi" : "Arsipkan (sembunyikan dari pilihan)"} onClick={() => toggleArchive(a)}>
+            {a.archived ? <ArchiveRestore className="h-4 w-4" aria-hidden /> : <Archive className="h-4 w-4" aria-hidden />}
+          </Button>
+        ) : (
+          <Button variant="ghost" size="icon" aria-label={`Hapus ${a.name}`} title="Hapus" onClick={() => remove(a)}>
+            <Trash2 className="h-4 w-4" aria-hidden />
+          </Button>
+        ))}
+    </WriteOnly>
+  );
+
   return (
     <Page>
       <PageHeader title="Daftar Akun" description="Akun adalah “laci-laci” pembukuan: tiap uang masuk atau keluar dicatat ke laci yang sesuai. Dompet dan kategori juga termasuk akun.">
@@ -165,7 +184,27 @@ export function AccountsPage() {
                       </Button>
                     </WriteOnly>
                   </div>
-                  <div className="relative overflow-x-auto">
+                  {/* HP: satu kartu per akun, supaya saldo dan tombolnya tidak terpotong. */}
+                  <ul className="divide-y divide-line md:hidden">
+                    {rows.map((a) => (
+                      <li key={a.id} className={cn("flex items-start gap-2 px-4 py-3", a.archived && "text-faint")}>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm">
+                            <span className="tnum mr-1.5 text-muted">{a.code}</span>
+                            <span className="font-semibold break-words">{a.name}</span>
+                          </p>
+                          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
+                            {SUBTYPE_LABEL[a.subtype]}
+                            {a.system && <Badge>Bawaan</Badge>}
+                            {a.archived && <Badge>Diarsipkan</Badge>}
+                          </p>
+                          <p className="tnum mt-1 text-sm font-semibold">{rp(a.balance)}</p>
+                        </div>
+                        <div className="no-print -my-1 -mr-1 flex shrink-0">{rowActions(a)}</div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="relative hidden overflow-x-auto md:block">
                     <table className="w-full min-w-[32rem]">
                       <thead className="sr-only">
                         <tr>
@@ -179,7 +218,7 @@ export function AccountsPage() {
                         {rows.map((a) => (
                           <tr key={a.id} className={a.archived ? "text-faint" : undefined}>
                             <td className={`${td} tnum w-20 text-muted`}>{a.code}</td>
-                            <td className={td}>
+                            <td className={`${td} wrap-anywhere`}>
                               <span className="font-semibold">{a.name}</span>
                               <span className="ml-2 text-[13px] text-muted">{SUBTYPE_LABEL[a.subtype]}</span>
                               {a.system && <Badge className="ml-2">Bawaan</Badge>}
@@ -187,21 +226,7 @@ export function AccountsPage() {
                             </td>
                             <td className={`${td} tnum text-right font-semibold whitespace-nowrap`}>{rp(a.balance)}</td>
                             <td className={`${td} no-print w-32 text-right whitespace-nowrap`}>
-                              <WriteOnly>
-                                <Button variant="ghost" size="icon" aria-label={`Ubah ${a.name}`} title="Ubah" onClick={() => setForm({ open: true, edit: a, type: a.type })}>
-                                  <Pencil className="h-4 w-4" aria-hidden />
-                                </Button>
-                                {!a.system &&
-                                  (a.used ? (
-                                    <Button variant="ghost" size="icon" aria-label={a.archived ? `Aktifkan lagi ${a.name}` : `Arsipkan ${a.name}`} title={a.archived ? "Aktifkan lagi" : "Arsipkan (sembunyikan dari pilihan)"} onClick={() => toggleArchive(a)}>
-                                      {a.archived ? <ArchiveRestore className="h-4 w-4" aria-hidden /> : <Archive className="h-4 w-4" aria-hidden />}
-                                    </Button>
-                                  ) : (
-                                    <Button variant="ghost" size="icon" aria-label={`Hapus ${a.name}`} title="Hapus" onClick={() => remove(a)}>
-                                      <Trash2 className="h-4 w-4" aria-hidden />
-                                    </Button>
-                                  ))}
-                              </WriteOnly>
+                              {rowActions(a)}
                             </td>
                           </tr>
                         ))}

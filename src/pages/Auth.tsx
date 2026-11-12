@@ -473,6 +473,7 @@ export function Onboarding({ user, books, invitations, onDone, onSwitchBook, onA
   const [businessName, setBusinessName] = useState("");
   const [openingCash, setOpeningCash] = useState(0);
   const [openingBank, setOpeningBank] = useState(0);
+  const [openingDate, setOpeningDate] = useState(today());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -481,7 +482,7 @@ export function Onboarding({ user, books, invitations, onDone, onSwitchBook, onA
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ user: User }>("/auth/onboarding", { method: "POST", body: { usage, businessName, openingCash, openingBank, date: today() } });
+      const r = await api<{ user: User }>("/auth/onboarding", { method: "POST", body: { usage, businessName, openingCash, openingBank, date: openingDate || today() } });
       onDone(r.user);
       go("/dasbor", true);
     } catch (err) {
@@ -576,6 +577,9 @@ export function Onboarding({ user, books, invitations, onDone, onSwitchBook, onA
           </Field>
           <Field label="Saldo rekening bank" hint="Jumlahkan semua rekening. Dompet digital bisa ditambahkan nanti.">
             {(id) => <MoneyInput id={id} value={openingBank} onChange={setOpeningBank} />}
+          </Field>
+          <Field label="Saldo itu per tanggal" hint="Pakai tanggal paling awal dari transaksi yang mau kamu catat. Pengeluaran tidak bisa dicatat di tanggal sebelum ini, karena belum ada uangnya.">
+            {(id) => <Input id={id} type="date" value={openingDate} max={today()} onChange={(e) => setOpeningDate(e.target.value)} required />}
           </Field>
           <div className="flex gap-2">
             <Button variant="secondary" className="h-11" onClick={() => setStage(0)}>

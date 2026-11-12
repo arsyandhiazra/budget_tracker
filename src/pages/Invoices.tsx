@@ -341,7 +341,7 @@ export function InvoicesPage() {
                 />
               ) : (
                 <>
-                  <div className="hidden overflow-x-auto md:block">
+                  <div className="hidden overflow-x-auto xl:block">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-line">
@@ -375,7 +375,7 @@ export function InvoicesPage() {
                       </tbody>
                     </table>
                   </div>
-                  <ul className="divide-y divide-line md:hidden">
+                  <ul className="divide-y divide-line xl:hidden">
                     {data.items.map((i) => (
                       <li key={i.id}>
                         <a href={`#/faktur/${i.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-paper/50">
@@ -576,9 +576,9 @@ export function InvoiceViewPage({ id }: { id: string }) {
             <Card className="print-plain p-6 sm:p-10">
               <header className="flex flex-wrap items-start justify-between gap-6 border-b border-line pb-6">
                 <div className="min-w-0">
-                  <h1 className="text-2xl font-extrabold tracking-tight">{seller.name}</h1>
-                  {seller.address && <p className="mt-1 max-w-sm text-sm whitespace-pre-line text-muted">{seller.address}</p>}
-                  {seller.phone && <p className="text-sm text-muted">Telp. {seller.phone}</p>}
+                  <h1 className="text-2xl font-extrabold tracking-tight wrap-anywhere">{seller.name}</h1>
+                  {seller.address && <p className="mt-1 max-w-sm text-sm whitespace-pre-line text-muted wrap-anywhere">{seller.address}</p>}
+                  {seller.phone && <p className="text-sm text-muted wrap-anywhere">Telp. {seller.phone}</p>}
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-semibold tracking-[0.2em] text-muted uppercase">Faktur</p>
@@ -592,10 +592,10 @@ export function InvoiceViewPage({ id }: { id: string }) {
               <section className="grid grid-cols-1 gap-6 py-6 sm:grid-cols-2">
                 <div>
                   <p className="text-xs font-semibold tracking-wide text-muted uppercase">Ditagihkan kepada</p>
-                  <p className="mt-1 font-bold">{inv.customer.name}</p>
-                  {inv.customer.address && <p className="text-sm whitespace-pre-line text-muted">{inv.customer.address}</p>}
-                  {inv.customer.phone && <p className="text-sm text-muted">{inv.customer.phone}</p>}
-                  {inv.customer.email && <p className="text-sm text-muted">{inv.customer.email}</p>}
+                  <p className="mt-1 font-bold wrap-anywhere">{inv.customer.name}</p>
+                  {inv.customer.address && <p className="text-sm whitespace-pre-line text-muted wrap-anywhere">{inv.customer.address}</p>}
+                  {inv.customer.phone && <p className="text-sm text-muted wrap-anywhere">{inv.customer.phone}</p>}
+                  {inv.customer.email && <p className="text-sm text-muted wrap-anywhere">{inv.customer.email}</p>}
                 </div>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm sm:justify-self-end">
                   <dt className="text-muted">Tanggal faktur</dt>
@@ -605,7 +605,21 @@ export function InvoiceViewPage({ id }: { id: string }) {
                 </dl>
               </section>
 
-              <div className="overflow-x-auto">
+              {/* HP: tiap uraian jadi satu baris kartu. Tabel tetap dipakai di layar lebar dan saat dicetak. */}
+              <ul className="divide-y divide-line border-y border-line-strong md:hidden print:hidden">
+                {inv.items.map((i, n) => (
+                  <li key={n} className="py-3 text-sm">
+                    <p className="wrap-anywhere">{i.description}</p>
+                    <p className="tnum mt-1 flex items-baseline justify-between gap-3 text-muted">
+                      <span>
+                        {dec(i.quantity)} × {rp(i.unitPrice)}
+                      </span>
+                      <span className="font-semibold whitespace-nowrap text-ink">{rp(i.amount)}</span>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <div className="hidden overflow-x-auto md:block print:block">
                 <table className="w-full min-w-[32rem] text-sm">
                   <thead>
                     <tr className="border-y border-line-strong">
@@ -618,7 +632,7 @@ export function InvoiceViewPage({ id }: { id: string }) {
                   <tbody className="divide-y divide-line">
                     {inv.items.map((i, n) => (
                       <tr key={n}>
-                        <td className={td}>{i.description}</td>
+                        <td className={`${td} wrap-anywhere`}>{i.description}</td>
                         <td className={`${td} tnum text-right`}>{dec(i.quantity)}</td>
                         <td className={`${td} tnum text-right`}>{rp(i.unitPrice)}</td>
                         <td className={`${td} tnum text-right font-semibold`}>{rp(i.amount)}</td>
@@ -668,13 +682,13 @@ export function InvoiceViewPage({ id }: { id: string }) {
                   {seller.paymentInfo && (
                     <div>
                       <p className="text-xs font-semibold tracking-wide text-muted uppercase">Pembayaran ke</p>
-                      <p className="mt-1 whitespace-pre-line">{seller.paymentInfo}</p>
+                      <p className="mt-1 whitespace-pre-line wrap-anywhere">{seller.paymentInfo}</p>
                     </div>
                   )}
                   {inv.notes && (
                     <div>
                       <p className="text-xs font-semibold tracking-wide text-muted uppercase">Catatan</p>
-                      <p className="mt-1 whitespace-pre-line">{inv.notes}</p>
+                      <p className="mt-1 whitespace-pre-line wrap-anywhere">{inv.notes}</p>
                     </div>
                   )}
                 </section>

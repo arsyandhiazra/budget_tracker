@@ -17,7 +17,7 @@ const FILES = ['mutasi-openpyxl.xlsx', 'mutasi-xlsxwriter.xlsx', 'mutasi-libreof
 
 async function setup(s, email = `imp-${Math.random().toString(36).slice(2)}@contoh.test`) {
   const c = s.client();
-  await s.signUp(c, { email, usage: 'usaha', openingCash: 0, openingBank: 0, date: '2026-01-01' });
+  await s.signUp(c, { email, usage: 'usaha', openingCash: 1_000_000, openingBank: 10_000_000, date: '2026-01-01' });
   const A = Object.fromEntries((await c.get('/api/accounts')).data.accounts.map((a) => [a.name, a.id]));
   const balance = async (name) => (await c.get('/api/accounts')).data.accounts.find((a) => a.name === name)?.balance;
   return { c, A, balance };
@@ -120,8 +120,8 @@ for (const file of FILES) {
       assert.match(by('Beli sesuatu').message, /Kategori "Kategori Baru" belum ada/);
 
       // Pratinjau tidak mengubah data.
-      assert.equal(await balance('Bank'), 0);
-      assert.equal((await c.get('/api/transactions')).data.total, 0);
+      assert.equal(await balance('Bank'), 10_000_000);
+      assert.equal((await c.get('/api/transactions')).data.total, 1);
 
       // Dengan izin membuat kategori, baris itu sah dan kategorinya dicatat sebagai "baru".
       const again = (await upload(s, c, 'preview', fx(file), `?defaultWalletId=${A.Bank}&createCategories=1`)).data;
@@ -142,15 +142,15 @@ test('simpan impor: saldo & laporan benar, kategori baru dibuat, pencatat tersim
     const strict = await upload(s, c, 'commit', fx('mutasi-openpyxl.xlsx'), `?defaultWalletId=${A.Bank}&createCategories=1`);
     assert.equal(strict.status, 400);
     assert.match(strict.data.error.message, /1 baris bermasalah/);
-    assert.equal((await c.get('/api/transactions')).data.total, 0);
+    assert.equal((await c.get('/api/transactions')).data.total, 1);
 
     const r = await upload(s, c, 'commit', fx('mutasi-openpyxl.xlsx'), q);
     assert.equal(r.status, 201, JSON.stringify(r.data));
     assert.deepEqual(r.data, { imported: 5, duplicatesSkipped: 0, errorsSkipped: 1, categoriesCreated: ['Kategori Baru'] });
 
-    // Bank: +3.000.000 −1.200.000 +500.000 ; Kas: −150.000 −75.000
-    assert.equal(await balance('Bank'), 2_300_000);
-    assert.equal(await balance('Kas'), -225_000);
+    // Bank: 10.000.000 +3.000.000 −1.200.000 +500.000 ; Kas: 1.000.000 −150.000 −75.000
+    assert.equal(await balance('Bank'), 12_300_000);
+    assert.equal(await balance('Kas'), 775_000);
     assert.equal(await balance('Sewa'), 1_200_000);
     assert.equal(await balance('Kategori Baru'), 75_000);
     assert.equal(await balance('Pendapatan Lain-lain'), 500_000);
@@ -164,14 +164,14 @@ test('simpan impor: saldo & laporan benar, kategori baru dibuat, pencatat tersim
 
     // Muncul di daftar transaksi seperti catatan biasa (bisa diubah/dihapus), lengkap dengan kategorinya.
     const list = (await c.get('/api/transactions?limit=50')).data;
-    assert.equal(list.total, 5);
+    assert.equal(list.total, 6);
     const sewa = list.items.find((e) => e.description.startsWith('Sewa kios'));
     assert.equal(sewa.kind, 'expense');
     assert.equal(sewa.category.name, 'Sewa');
     assert.equal(sewa.cashAccount.name, 'Bank');
     assert.equal(sewa.createdBy.name, 'Pengguna Tes');
     assert.equal((await c.del(`/api/entries/${sewa.id}`)).status, 200);
-    assert.equal(await balance('Bank'), 3_500_000);
+    assert.equal(await balance('Bank'), 13_500_000);
 
     // Ada di jurnal dengan dua baris seimbang.
     const journal = (await c.get('/api/reports/journal?from=2026-01-01&to=2026-12-31')).data;
@@ -188,7 +188,7 @@ test('impor dua kali: transaksi yang sama persis dilewati, kecuali diminta lain'
     const q = `?defaultWalletId=${A.Bank}&createCategories=1&skipErrors=1`;
     assert.equal((await upload(s, c, 'commit', fx('mutasi-xlsxwriter.xlsx'), q)).status, 201);
     const total = async () => (await c.get('/api/transactions')).data.total;
-    assert.equal(await total(), 5);
+    assert.equal(await total(), 6);
 
     // File yang sama, tapi dibaca dari format lain (CSV) → tetap dikenali sebagai duplikat.
     const preview = (await upload(s, c, 'preview', fx('mutasi-titikkoma.csv'), q)).data;
@@ -199,13 +199,13 @@ test('impor dua kali: transaksi yang sama persis dilewati, kecuali diminta lain'
     const second = await upload(s, c, 'commit', fx('mutasi-libreoffice.xlsx'), q);
     assert.equal(second.status, 400, 'tidak ada yang baru');
     assert.match(second.data.error.message, /Tidak ada baris/);
-    assert.equal(await total(), 5);
+    assert.equal(await total(), 6);
 
     const forced = await upload(s, c, 'commit', fx('mutasi-libreoffice.xlsx'), `${q}&duplicates=include`);
     assert.equal(forced.status, 201);
     assert.equal(forced.data.imported, 5);
-    assert.equal(await total(), 10);
-    assert.equal(await balance('Bank'), 2 * 2_300_000);
+    assert.equal(await total(), 11);
+    assert.equal(await balance('Bank'), 10_000_000 + 2 * 2_300_000);
   } finally {
     await s.close();
   }
@@ -240,14 +240,14 @@ test('format kolom lain: Pemasukan/Pengeluaran terpisah, atau jumlah bertanda pl
     let r = await upload(s, c, 'commit', Buffer.from(twoCols));
     assert.equal(r.status, 201, JSON.stringify(r.data));
     assert.equal(r.data.imported, 2);
-    assert.equal(await balance('Bank'), 4_650_000);
+    assert.equal(await balance('Bank'), 14_650_000);
     assert.equal(await balance('Pendapatan Lain-lain'), 5_000_000, 'tanpa kolom kategori → kategori bawaan');
     assert.equal(await balance('Beban Lain-lain'), 350_000);
 
     const signed = 'Tanggal,Nominal,Dompet,Keterangan\n2026-03-05,-20000,Kas,Parkir\n2026-03-06,100000,Kas,Setoran\n';
     r = await upload(s, c, 'commit', Buffer.from(signed));
     assert.equal(r.status, 201, JSON.stringify(r.data));
-    assert.equal(await balance('Kas'), 80_000);
+    assert.equal(await balance('Kas'), 1_080_000);
 
     const both = 'Tanggal;Pemasukan;Pengeluaran;Dompet\n01/03/2026;1000;2000;Kas\n';
     r = await upload(s, c, 'preview', Buffer.from(both));
@@ -423,8 +423,8 @@ test('impor 2.000 baris sekaligus selesai wajar dan seluruhnya seimbang', async 
     assert.equal(r.status, 201, JSON.stringify(r.data));
     assert.equal(r.data.imported, 2000);
     assert.ok(took < 20_000, `impor 2.000 baris memakan ${took} ms`);
-    assert.equal(await balance('Bank'), expected);
-    assert.equal((await c.get('/api/transactions?limit=1')).data.total, 2000);
+    assert.equal(await balance('Bank'), 10_000_000 + expected);
+    assert.equal((await c.get('/api/transactions?limit=1')).data.total, 2001);
     assert.equal((await c.get('/api/reports/balance-sheet?to=2026-12-31')).data.balanced, true);
     assert.equal((await c.get('/api/reports/trial-balance?to=2026-12-31')).data.balanced, true);
   } finally {

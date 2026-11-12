@@ -137,12 +137,38 @@ Catatan dari jurnal diubah atau dihapus lewat **Jurnal Umum**, bukan lewat tombo
 Piutang. Jurnal yang utangnya sudah ada pembayarannya tidak bisa dihapus atau dikecilkan di bawah
 jumlah yang sudah dibayar.
 
+### Saldo dompet tidak boleh minus
+
+Uang yang keluar dari sebuah dompet (kas, bank, dompet digital) ditolak kalau saldo dompet itu
+tidak cukup. Aturan ini berlaku untuk **semua** jalur: pengeluaran, transfer, prive, bayar utang,
+meminjamkan uang, jurnal manual, dan impor Excel/CSV. Pengecekannya dilakukan di server, bukan hanya
+di tampilan, dan aman kalau ada dua catatan yang masuk bersamaan.
+
+- **Dihitung per tanggal.** Saldo dicek hari demi hari, jadi pengeluaran bertanggal lampau juga
+  ditolak kalau pada tanggal itu uangnya belum ada. Karena itu saat pengaturan awal ada isian
+  **Saldo itu per tanggal**: pakai tanggal paling awal dari transaksi yang mau kamu catat.
+- **Mengubah atau menghapus pemasukan** ditolak kalau uang dari pemasukan itu sudah terpakai
+  (saldo pada tanggal setelahnya jadi minus).
+- **Impor** ditolak seluruhnya kalau ada baris yang membuat saldo minus. Pratinjau menunjukkan
+  dompet dan tanggalnya, jadi tinggal catat saldo awal atau pemasukannya dulu.
+- Dompet yang sudah terlanjur minus dari data lama tidak dikunci; perubahan hanya ditolak kalau
+  membuatnya **makin** minus.
+- Di formulir, saldo yang tersedia ditampilkan di bawah pilihan dompet, dan jumlah yang kelebihan
+  ditandai sebelum disimpan.
+
 ### Mengganti email akun
 
 **Pengaturan → Ganti email**: masukkan email baru dan kata sandi, lalu kode 6 angka dikirim ke
 email **baru** itu (untuk memastikan alamatnya milikmu). Setelah kode dimasukkan, email diganti,
 alamat lama diberi tahu, dan perangkat lain otomatis keluar. Mulai saat itu masuk dan kode
 verifikasi memakai email baru.
+
+### Dipakai di HP
+
+Aplikasi dirancang untuk layar HP dalam posisi tegak (portrait). Tabel yang lebar (jurnal, buku
+besar, kontak, daftar akun, rincian faktur, pratinjau impor) tampil sebagai kartu di layar sempit
+dan kembali menjadi tabel di layar lebar atau saat dicetak. Pemilih rentang waktu muncul sebagai
+lembar dari bawah layar, dan jendela isian selalu muat di layar.
 
 ### Tampilan terang dan gelap
 
@@ -353,6 +379,8 @@ Supaya jelas, hal-hal ini belum dibuat:
   dipindahkan; tidak ada riwayat perubahan (yang tersimpan hanya siapa yang mencatat).
 - **Pelunasan lewat jurnal manual** dicocokkan otomatis ke utang tertua. Kalau ingin menentukan
   sendiri utang mana yang dilunasi, pakai tombol **Bayar** di Utang & Piutang.
+- **Saldo minus**: tidak ada pengaturan untuk mengizinkannya (misalnya rekening dengan fasilitas
+  overdraft atau kartu kredit). Untuk kartu kredit, catat pembeliannya sebagai utang.
 - **Tema** terang/gelap dipilih per browser; tidak ikut berpindah ke perangkat lain.
 - Faktur/laporan dicetak lewat fitur cetak browser, jadi tampilannya mengikuti browser yang dipakai.
 

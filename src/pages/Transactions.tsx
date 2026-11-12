@@ -225,7 +225,7 @@ export function TransactionsPage() {
                   <li key={e.id} className="flex items-center gap-3 px-4 py-3">
                     <KindIcon kind={e.kind} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{e.description}</p>
+                      <p className="line-clamp-2 text-sm font-semibold break-words">{e.description}</p>
                       <p className="truncate text-[13px] text-muted">
                         {fmtDate(e.date)} · {detail(e)}
                       </p>

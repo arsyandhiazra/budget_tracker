@@ -126,7 +126,7 @@ export function MoneyInput({ value, onChange, id, placeholder = "0", autoFocus, 
 
 export function Segmented<T extends string>({ options, value, onChange, label, className }: { options: { value: T; label: string }[]; value: T; onChange: (v: T) => void; label: string; className?: string }) {
   return (
-    <div role="group" aria-label={label} className={cn("inline-flex max-w-full gap-1 overflow-x-auto rounded-xl bg-paper p-1", className)}>
+    <div role="group" aria-label={label} className={cn("inline-flex max-w-full flex-wrap gap-1 rounded-xl bg-paper p-1", className)}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -198,7 +198,7 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-bad/30 bg-bad-soft px-4 py-3 text-sm text-bad" role="alert">
       <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1">{message}</span>
+      <span className="min-w-0 flex-1 wrap-anywhere">{message}</span>
       {onRetry && (
         <Button variant="secondary" size="sm" onClick={onRetry}>
           <RefreshCw className="h-3.5 w-3.5" aria-hidden /> Coba lagi
@@ -278,14 +278,14 @@ export function Modal({ open, onClose, title, description, children, footer, wid
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={cn("animate-pop relative flex max-h-[92vh] w-full flex-col rounded-t-3xl bg-white shadow-pop outline-none sm:rounded-3xl", wide ? "sm:max-w-3xl" : "sm:max-w-lg")}
+        className={cn("animate-pop relative flex max-h-modal w-full flex-col rounded-t-3xl bg-white shadow-pop outline-none sm:rounded-3xl", wide ? "sm:max-w-3xl" : "sm:max-w-lg")}
       >
         <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-3">
           <div className="min-w-0">
-            <h2 id={titleId} className="text-lg font-bold tracking-tight">
+            <h2 id={titleId} className="text-lg font-bold tracking-tight wrap-anywhere">
               {title}
             </h2>
-            {description && <p className="mt-0.5 text-sm text-muted">{description}</p>}
+            {description && <p className="mt-0.5 text-sm text-muted wrap-anywhere">{description}</p>}
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Tutup" className="-mt-1 -mr-2">
             <X className="h-5 w-5" aria-hidden />
@@ -329,7 +329,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div key={t.id} role="status" className={cn("animate-pop pointer-events-auto flex max-w-md items-start gap-2 rounded-xl px-4 py-2.5 text-sm font-medium shadow-pop", t.tone === "error" ? "bg-bad text-white" : "bg-ink text-white")}>
             {t.tone === "error" ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />}
-            <span>{t.message}</span>
+            <span className="min-w-0 wrap-anywhere">{t.message}</span>
           </div>
         ))}
       </div>
@@ -348,7 +348,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
           </>
         }
       >
-        <div className="text-sm text-ink-soft">{ask?.message}</div>
+        <div className="text-sm text-ink-soft wrap-anywhere">{ask?.message}</div>
       </Modal>
     </FeedbackContext.Provider>
   );

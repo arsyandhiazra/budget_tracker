@@ -35,7 +35,7 @@ export function DashboardPage({ user }: { user: User }) {
                   <header className="mb-7 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
                     <div className="min-w-0">
                       <h1 className="text-2xl font-bold tracking-tight">Dasbor</h1>
-                      <p className="mt-1 text-sm text-muted">
+                      <p className="mt-1 text-sm text-muted wrap-anywhere">
                         {user.businessName || user.name} · {period.label}
                       </p>
                     </div>
@@ -52,7 +52,7 @@ export function DashboardPage({ user }: { user: User }) {
                   <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
                     <div className="lg:col-span-5">
                       <p className="text-sm font-medium text-muted">Total uang (kas, bank, dompet digital)</p>
-                      <p className="mt-1 text-[2.75rem] leading-none font-semibold tracking-tight break-words">{rp(d.kpis.cashBalance)}</p>
+                      <p className="mt-1 text-[clamp(1.875rem,9vw,2.75rem)] leading-none font-semibold tracking-tight break-words">{rp(d.kpis.cashBalance)}</p>
                       <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted">
                         {d.wallets.map((w) => (
                           <li key={w.id}>
@@ -61,7 +61,7 @@ export function DashboardPage({ user }: { user: User }) {
                         ))}
                       </ul>
 
-                      <dl className="mt-7 grid grid-cols-2 gap-x-6 gap-y-6 border-t border-line-strong pt-6">
+                      <dl className="mt-7 grid grid-cols-1 gap-x-6 gap-y-6 border-t border-line-strong pt-6 min-[440px]:grid-cols-2">
                         <div>
                           <dt className="flex items-center gap-1.5 text-sm font-medium text-muted">
                             <span className="h-2.5 w-2.5 rounded-[3px] bg-masuk" aria-hidden /> Pemasukan
@@ -76,7 +76,7 @@ export function DashboardPage({ user }: { user: User }) {
                           <dd className="mt-1 text-2xl font-semibold tracking-tight">{rp(d.kpis.expense)}</dd>
                           <Delta now={d.kpis.expense} before={d.previous?.expense} goodWhenUp={false} label={period.compareLabel} />
                         </div>
-                        <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-white px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-white px-4 py-3 min-[440px]:col-span-2">
                           <dt className="text-sm font-medium text-muted">{business ? (net >= 0 ? "Laba bersih" : "Rugi bersih") : net >= 0 ? "Sisa (pemasukan − pengeluaran)" : "Kurang (pengeluaran lebih besar)"}</dt>
                           <dd className="flex items-center gap-2">
                             <span className="tnum text-lg font-bold">{rp(net)}</span>

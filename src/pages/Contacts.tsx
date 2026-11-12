@@ -112,6 +112,17 @@ export function ContactsPage() {
     }
   }
 
+  const rowActions = (c: Contact) => (
+    <WriteOnly>
+      <Button variant="ghost" size="icon" aria-label={`Ubah ${c.name}`} title="Ubah" onClick={() => setForm({ open: true, edit: c })}>
+        <Pencil className="h-4 w-4" aria-hidden />
+      </Button>
+      <Button variant="ghost" size="icon" aria-label={`Hapus ${c.name}`} title="Hapus" onClick={() => remove(c)}>
+        <Trash2 className="h-4 w-4" aria-hidden />
+      </Button>
+    </WriteOnly>
+  );
+
   return (
     <Page>
       <PageHeader title="Kontak" description="Orang atau pihak yang sering bertransaksi denganmu. Berguna untuk melacak utang dan piutang per nama.">
@@ -133,49 +144,80 @@ export function ContactsPage() {
                 </WriteOnly>
               </Empty>
             ) : (
-              <div className="relative overflow-x-auto">
-                <table className="w-full min-w-[40rem]">
-                  <thead>
-                    <tr className="border-b border-line">
-                      <th scope="col" className={th}>Nama</th>
-                      <th scope="col" className={th}>Hubungi</th>
-                      <th scope="col" className={`${th} text-right`}>Utangmu</th>
-                      <th scope="col" className={`${th} text-right`}>Piutangmu</th>
-                      <th scope="col" className={`${th} w-24`}>
-                        <span className="sr-only">Aksi</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line">
-                    {data.contacts.map((c) => (
-                      <tr key={c.id} className="hover:bg-paper/50">
-                        <td className={td}>
-                          <span className="font-semibold">{c.name}</span>
-                          <Badge className="ml-2">{TYPE_LABEL[c.type]}</Badge>
-                          {c.note && <span className="mt-0.5 block text-[13px] text-muted">{c.note}</span>}
-                        </td>
-                        <td className={`${td} text-muted`}>
-                          {c.email && <span className="block">{c.email}</span>}
-                          {c.phone && <span className="tnum block">{c.phone}</span>}
-                          {!c.email && !c.phone && "-"}
-                        </td>
-                        <td className={`${td} tnum text-right whitespace-nowrap`}>{c.payable ? <span className="font-semibold">{rp(c.payable)}</span> : <span className="text-faint">-</span>}</td>
-                        <td className={`${td} tnum text-right whitespace-nowrap`}>{c.receivable ? <span className="font-semibold">{rp(c.receivable)}</span> : <span className="text-faint">-</span>}</td>
-                        <td className={`${td} no-print text-right whitespace-nowrap`}>
-                          <WriteOnly>
-                            <Button variant="ghost" size="icon" aria-label={`Ubah ${c.name}`} title="Ubah" onClick={() => setForm({ open: true, edit: c })}>
-                              <Pencil className="h-4 w-4" aria-hidden />
-                            </Button>
-                            <Button variant="ghost" size="icon" aria-label={`Hapus ${c.name}`} title="Hapus" onClick={() => remove(c)}>
-                              <Trash2 className="h-4 w-4" aria-hidden />
-                            </Button>
-                          </WriteOnly>
-                        </td>
+              <>
+                {/* HP: satu kartu per kontak, supaya jumlah utang/piutang dan tombolnya tidak terpotong. */}
+                <ul className="divide-y divide-line md:hidden">
+                  {data.contacts.map((c) => (
+                    <li key={c.id} className="flex items-start gap-2 px-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="min-w-0 font-semibold wrap-anywhere">{c.name}</span>
+                          <Badge>{TYPE_LABEL[c.type]}</Badge>
+                        </p>
+                        {c.note && <p className="text-[13px] break-words text-muted">{c.note}</p>}
+                        {(c.email || c.phone) && (
+                          <p className="mt-0.5 text-[13px] break-all text-muted">
+                            {c.email}
+                            {c.email && c.phone ? " · " : ""}
+                            {c.phone && <span className="tnum">{c.phone}</span>}
+                          </p>
+                        )}
+                        {(c.payable > 0 || c.receivable > 0) && (
+                          <p className="tnum mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[13px] text-muted">
+                            {c.payable > 0 && (
+                              <span>
+                                Utangmu <strong className="font-semibold text-ink">{rp(c.payable)}</strong>
+                              </span>
+                            )}
+                            {c.receivable > 0 && (
+                              <span>
+                                Piutangmu <strong className="font-semibold text-ink">{rp(c.receivable)}</strong>
+                              </span>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                      <div className="no-print -my-1 -mr-1 flex shrink-0">{rowActions(c)}</div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="relative hidden overflow-x-auto md:block">
+                  <table className="w-full min-w-[40rem]">
+                    <thead>
+                      <tr className="border-b border-line">
+                        <th scope="col" className={th}>Nama</th>
+                        <th scope="col" className={th}>Hubungi</th>
+                        <th scope="col" className={`${th} text-right`}>Utangmu</th>
+                        <th scope="col" className={`${th} text-right`}>Piutangmu</th>
+                        <th scope="col" className={`${th} w-24`}>
+                          <span className="sr-only">Aksi</span>
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {data.contacts.map((c) => (
+                        <tr key={c.id} className="hover:bg-paper/50">
+                          <td className={`${td} wrap-anywhere`}>
+                            <span className="font-semibold">{c.name}</span>
+                            <Badge className="ml-2">{TYPE_LABEL[c.type]}</Badge>
+                            {c.note && <span className="mt-0.5 block text-[13px] text-muted">{c.note}</span>}
+                          </td>
+                          <td className={`${td} text-muted wrap-anywhere`}>
+                            {c.email && <span className="block">{c.email}</span>}
+                            {c.phone && <span className="tnum block">{c.phone}</span>}
+                            {!c.email && !c.phone && "-"}
+                          </td>
+                          <td className={`${td} tnum text-right whitespace-nowrap`}>{c.payable ? <span className="font-semibold">{rp(c.payable)}</span> : <span className="text-faint">-</span>}</td>
+                          <td className={`${td} tnum text-right whitespace-nowrap`}>{c.receivable ? <span className="font-semibold">{rp(c.receivable)}</span> : <span className="text-faint">-</span>}</td>
+                          <td className={`${td} no-print text-right whitespace-nowrap`}>
+                            {rowActions(c)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </Card>
         )}

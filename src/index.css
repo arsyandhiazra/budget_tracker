@@ -126,6 +126,7 @@
 
 @utility tnum {
   font-variant-numeric: tabular-nums;
+  overflow-wrap: normal; /* angka tidak dipatahkan di tengah, walau induknya memakai wrap-anywhere */
 }
 
 @keyframes pop-in {
@@ -152,8 +153,28 @@
 @utility animate-pop {
   animation: pop-in 0.18s ease-out;
 }
+/* Tinggi maksimum jendela/lembar. `dvh` = tinggi layar yang benar-benar kelihatan di HP (bilah alamat
+   browser tidak dihitung), jadi judul dan tombol Simpan tidak terpotong. `vh` hanya cadangan untuk browser lama. */
+@utility max-h-modal {
+  max-height: 92vh;
+  max-height: 92dvh;
+}
+@utility max-h-sheet {
+  max-height: 85vh;
+  max-height: 85dvh;
+}
 @utility animate-fade {
   animation: fade-in 0.15s ease-out;
+}
+
+/* iPhone/iPad memperbesar halaman sendiri bila isian berhuruf < 16px difokuskan, lalu tampilan jadi tidak pas.
+   Di iOS, isian dibuat 16px. Android dan desktop tidak terpengaruh. */
+@supports (-webkit-touch-callout: none) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

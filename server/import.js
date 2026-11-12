@@ -230,6 +230,8 @@ export async function analyzeRows(db, userId, rows, opts = {}) {
   }
 
   const ok = out.filter((r) => r.status === 'ok');
+  // Saldo dompet tidak boleh minus: pratinjau memberi tahu kalau baris-baris yang siap diimpor akan melanggarnya.
+  const overdraft = await acc.previewOverdraft(db, userId, cashDeltas(ok));
   const sum = (kind) => ok.filter((r) => r.kind === kind).reduce((s, r) => s + r.amount, 0);
   const dates = ok.map((r) => r.date).sort();
   const summary = {
@@ -242,11 +244,22 @@ export async function analyzeRows(db, userId, rows, opts = {}) {
     from: dates[0] ?? null,
     to: dates[dates.length - 1] ?? null,
     newCategories: [...newCategories.values()],
+    overdraft,
   };
   return { rows: out, summary, newCategories: [...newCategories.values()] };
 }
 
 const publicRow = ({ _category, _wallet, ...rest }) => rest;
+
+// Perubahan saldo tiap dompet (per tanggal) kalau baris-baris ini diimpor.
+function cashDeltas(rows) {
+  const deltas = new Map();
+  for (const r of rows) {
+    if (!r._wallet) continue;
+    acc.addCash(deltas, { accountId: r._wallet.id, name: r._wallet.name, cash: true, debit: r.kind === 'income' ? r.amount : 0, credit: r.kind === 'expense' ? r.amount : 0 }, r.date);
+  }
+  return deltas;
+}
 const PREVIEW_ROWS = 500;
 
 export async function previewImport(db, userId, buffer, opts) {
@@ -304,7 +317,9 @@ export async function commitImport(db, userId, buffer, opts, actorId) {
     }
     for (const r of chosen) if (r.newCategory) r._category = created.get(`${r.kind}:${r.category.toLowerCase()}`);
 
+    await acc.lockWallets(db, userId, chosen.map((r) => r._wallet.id)); // dompet dikunci sebelum menulis apa pun
     await bulkInsertEntries(db, userId, chosen, actorId);
+    await acc.assertNoOverdraft(db, userId, cashDeltas(chosen), 'import'); // lewat batas = seluruh impor dibatalkan
     return {
       imported: chosen.length,
       duplicatesSkipped: opts.includeDuplicates ? 0 : summary.duplicates,

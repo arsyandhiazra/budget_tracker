@@ -187,8 +187,8 @@ export function SettingsPage({ user, books, onUser, onSwitchBook, onLoggedOut, o
             <Field label="Nama">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} required />}</Field>
             <Field label="Email" hint="Dipakai untuk masuk dan menerima kode verifikasi.">
               {(id) => (
-                <div className="flex gap-2">
-                  <Input id={id} value={user.email} disabled readOnly />
+                <div className="flex flex-wrap gap-2">
+                  <Input id={id} value={user.email} disabled readOnly className="min-w-0 flex-1 basis-40" />
                   <Button variant="secondary" onClick={() => setChangingEmail(true)}>
                     Ganti email
                   </Button>
@@ -211,7 +211,7 @@ export function SettingsPage({ user, books, onUser, onSwitchBook, onLoggedOut, o
             />
           ) : (
             <p className="text-sm text-muted">
-              Kamu membuka pembukuan <strong className="text-ink">{user.businessName}</strong>. Nama dan kop pembukuan hanya bisa diubah oleh pemiliknya.
+              Kamu membuka pembukuan <strong className="text-ink wrap-anywhere">{user.businessName}</strong>. Nama dan kop pembukuan hanya bisa diubah oleh pemiliknya.
             </p>
           )}
         </Block>
