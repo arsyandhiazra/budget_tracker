@@ -5,8 +5,8 @@ import { cn } from "@/utils/cn";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { today } from "@/lib/format";
 import { go } from "@/lib/router";
-import type { User } from "@/lib/types";
-import { Brand } from "@/components/Layout";
+import { ROLE_LABEL, type BookInfo, type Invitation, type User } from "@/lib/types";
+import { Brand, ThemeToggle } from "@/components/Layout";
 import { Button, ErrorBox, Field, Input, MoneyInput, useFeedback } from "@/components/ui";
 
 const PENDING_KEY = "bt_pending_email";
@@ -53,9 +53,12 @@ function Shell({ children, step }: { children: ReactNode; step?: number }) {
   return (
     <div className="grid grid-cols-1 min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
       <div className="flex flex-col px-6 py-7 sm:px-12">
-        <a href="#/masuk" className="self-start">
-          <Brand />
-        </a>
+        <div className="flex items-center justify-between">
+          <a href="#/masuk">
+            <Brand />
+          </a>
+          <ThemeToggle className="-mr-2" />
+        </div>
         <div className="flex flex-1 items-center py-10">
           <div className="mx-auto w-full max-w-[26rem]">
             {step !== undefined && <Steps current={step} />}
@@ -453,7 +456,18 @@ export function Forgot() {
 
 // ───────────── Pengaturan awal ─────────────
 
-export function Onboarding({ user, onDone, onLogout }: { user: User; onDone: (u: User) => void; onLogout: () => void }) {
+type OnboardingProps = {
+  user: User;
+  books: BookInfo[];
+  invitations: Invitation[];
+  onDone: (u: User) => void;
+  onSwitchBook: (id: number) => void;
+  onAnswerInvitation: (id: number, accept: boolean) => void;
+  onLogout: () => void;
+};
+
+export function Onboarding({ user, books, invitations, onDone, onSwitchBook, onAnswerInvitation, onLogout }: OnboardingProps) {
+  const shared = books.filter((b) => !b.own);
   const [stage, setStage] = useState(0);
   const [usage, setUsage] = useState<"pribadi" | "usaha">("pribadi");
   const [businessName, setBusinessName] = useState("");
@@ -492,6 +506,43 @@ export function Onboarding({ user, onDone, onLogout }: { user: User; onDone: (u:
           }}
           className="space-y-5"
         >
+          {(invitations.length > 0 || shared.length > 0) && (
+            <div className="rounded-2xl border border-line bg-paper p-4">
+              <p className="text-sm font-bold">Kamu sudah punya akses ke pembukuan lain</p>
+              <ul className="mt-3 space-y-3">
+                {invitations.map((i) => (
+                  <li key={`i${i.id}`} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="min-w-0">
+                      <strong>{i.bookName}</strong>
+                      <span className="block text-[13px] text-muted">
+                        Undangan dari {i.ownerName} · {ROLE_LABEL[i.role]}
+                      </span>
+                    </span>
+                    <span className="flex gap-2">
+                      <Button size="sm" onClick={() => onAnswerInvitation(i.id, true)}>
+                        Terima & buka
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => onAnswerInvitation(i.id, false)}>
+                        Tolak
+                      </Button>
+                    </span>
+                  </li>
+                ))}
+                {shared.map((b) => (
+                  <li key={`b${b.id}`} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="min-w-0">
+                      <strong>{b.name}</strong>
+                      <span className="block text-[13px] text-muted">{ROLE_LABEL[b.role]}</span>
+                    </span>
+                    <Button size="sm" onClick={() => onSwitchBook(b.id)}>
+                      Buka
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-[13px] text-muted">Atau atur pembukuanmu sendiri di bawah ini.</p>
+            </div>
+          )}
           <Heading title={`Hai ${user.name.split(" ")[0]}, mau dipakai untuk apa?`} text="Pilihan ini menentukan daftar kategori awal. Semuanya masih bisa diubah nanti." />
           <div role="radiogroup" aria-label="Penggunaan" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {choices.map((c) => (

@@ -86,6 +86,19 @@ export async function roleAccount(db, userId, role) {
   return acc;
 }
 
+// Akun "Utang Pajak (PPN)" dibuat saat faktur pertama yang memakai pajak (tidak semua pengguna butuh).
+export async function ensureTaxAccount(db, userId) {
+  const existing = await db.get("SELECT * FROM accounts WHERE user_id = ? AND role = 'tax_payable'", userId);
+  if (existing) return existing;
+  const taken = await db.get('SELECT 1 AS x FROM accounts WHERE user_id = ? AND code = ?', userId, '2301');
+  const code = taken ? await nextCode(db, userId, 'liability') : '2301';
+  const id = await db.insert(
+    'INSERT INTO accounts (user_id, code, name, type, subtype, role, created_at) VALUES (?,?,?,?,?,?,?)',
+    userId, code, 'Utang Pajak (PPN)', 'liability', 'other', 'tax_payable', nowIso(),
+  );
+  return db.get('SELECT * FROM accounts WHERE id = ?', id);
+}
+
 export async function getAccount(db, userId, id, label = 'Akun') {
   const acc = await db.get('SELECT * FROM accounts WHERE id = ? AND user_id = ?', v.id(id, label), userId);
   if (!acc) throw bad(`${label} tidak ditemukan.`);
@@ -219,17 +232,20 @@ async function checkContact(db, userId, contactId) {
   return row.id;
 }
 
-export async function createEntry(db, userId, { date, description, kind, contactId, lines }) {
+// createdBy = id orang yang mencatat (bukan pemilik pembukuan, kalau pembukuannya dibagi).
+// dueDate dipakai kalau jurnal manual ini mencatat utang/piutang.
+export async function createEntry(db, userId, { date, description, kind, contactId, lines, dueDate, createdBy }) {
   const d = v.date(date);
   const desc = v.str(description, 'Keterangan', { max: 200 });
   const clean = await cleanLines(db, userId, lines);
   const contact = await checkContact(db, userId, contactId);
-  return await db.tx(async () => {
+  return db.tx(async () => {
     const id = await db.insert(
-      'INSERT INTO entries (user_id, date, description, kind, amount, contact_id, created_at) VALUES (?,?,?,?,?,?,?)',
-      userId, d, desc, kind, clean.amount, contact, nowIso(),
+      'INSERT INTO entries (user_id, date, description, kind, amount, contact_id, created_at, created_by) VALUES (?,?,?,?,?,?,?,?)',
+      userId, d, desc, kind, clean.amount, contact, nowIso(), createdBy ?? null,
     );
     for (const [i, l] of clean.lines.entries()) await db.run('INSERT INTO lines (entry_id, account_id, debit, credit, position) VALUES (?,?,?,?,?)', id, l.accountId, l.debit, l.credit, i);
+    if (JOURNAL_KINDS.includes(kind)) await syncJournalDebts(db, userId, id, { dueDate });
     return id;
   });
 }
@@ -240,7 +256,7 @@ export async function getEntry(db, userId, id) {
   return entry;
 }
 
-export async function updateEntry(db, userId, id, { date, description, contactId, lines }, allowedKinds) {
+export async function updateEntry(db, userId, id, { date, description, contactId, lines, dueDate }, allowedKinds) {
   const entry = await getEntry(db, userId, id);
   if (!allowedKinds.includes(entry.kind)) throw bad('Transaksi ini tidak bisa diubah dari sini.');
   const d = v.date(date);
@@ -251,6 +267,7 @@ export async function updateEntry(db, userId, id, { date, description, contactId
     await db.run('UPDATE entries SET date = ?, description = ?, amount = ?, contact_id = ? WHERE id = ?', d, desc, clean.amount, contact, entry.id);
     await db.run('DELETE FROM lines WHERE entry_id = ?', entry.id);
     for (const [i, l] of clean.lines.entries()) await db.run('INSERT INTO lines (entry_id, account_id, debit, credit, position) VALUES (?,?,?,?,?)', entry.id, l.accountId, l.debit, l.credit, i);
+    if (JOURNAL_KINDS.includes(entry.kind)) await syncJournalDebts(db, userId, entry.id, { dueDate });
   });
 }
 
@@ -258,6 +275,17 @@ export async function deleteEntry(db, userId, id) {
   const entry = await getEntry(db, userId, id);
   if (entry.kind === 'debt' || entry.kind === 'debt_payment') {
     throw bad('Catatan ini terhubung ke utang/piutang. Hapus lewat menu Utang & Piutang.');
+  }
+  if (JOURNAL_KINDS.includes(entry.kind)) {
+    await db.tx(async () => {
+      const accounts = await journalDebtAccounts(db, entry.id);
+      const paid = await db.get('SELECT COUNT(*) AS n FROM debts d JOIN debt_payments p ON p.debt_id = d.id WHERE d.entry_id = ?', entry.id);
+      if (paid.n > 0) throw bad('Jurnal ini mencatat utang/piutang yang sudah ada pembayarannya. Hapus dulu pembayarannya (di menu Utang & Piutang, atau jurnal pembayarannya di Jurnal Umum).');
+      await db.run('DELETE FROM entries WHERE id = ?', entry.id);
+      // Pembayaran jurnal lain yang tadinya tidak punya pasangan mungkin sekarang bisa dicocokkan.
+      for (const accountId of accounts) await allocateUnmatched(db, userId, accountId);
+    });
+    return;
   }
   await db.run('DELETE FROM entries WHERE id = ?', entry.id);
 }
@@ -277,14 +305,27 @@ async function attachLines(db, entries) {
     if (!byEntry.has(r.entry_id)) byEntry.set(r.entry_id, []);
     byEntry.get(r.entry_id).push({ accountId: r.account_id, code: r.code, name: r.name, type: r.type, subtype: r.subtype, debit: r.debit, credit: r.credit });
   }
+  const debtRowsOf = await db.all(
+    `SELECT d.id, d.entry_id, d.kind, d.amount, d.due_date,
+            COALESCE((SELECT SUM(p.amount) FROM debt_payments p WHERE p.debt_id = d.id), 0) AS paid
+     FROM debts d WHERE d.entry_id IN (${ids.map(() => '?').join(',')})`,
+    ...ids,
+  );
+  const debtsByEntry = new Map();
+  for (const d of debtRowsOf) {
+    if (!debtsByEntry.has(d.entry_id)) debtsByEntry.set(d.entry_id, []);
+    debtsByEntry.get(d.entry_id).push({ id: d.id, kind: d.kind, amount: d.amount, paid: d.paid, dueDate: d.due_date });
+  }
   return entries.map((e) => {
     const lines = byEntry.get(e.id) || [];
     const pick = (fn) => { const l = lines.find(fn); return l ? { id: l.accountId, name: l.name } : null; };
     const out = {
       id: e.id, date: e.date, description: e.description, kind: e.kind, amount: e.amount,
       contact: e.contact_id ? { id: e.contact_id, name: e.contact_name } : null,
+      createdBy: e.created_by ? { id: e.created_by, name: e.created_by_name } : null,
       lines,
     };
+    if (debtsByEntry.has(e.id)) out.debts = debtsByEntry.get(e.id);
     // Ringkasan untuk tampilan sederhana: kategori & dompet yang dipakai.
     if (e.kind === 'income') { out.cashAccount = pick((l) => l.debit > 0); out.category = pick((l) => l.credit > 0); }
     else if (e.kind === 'expense') { out.category = pick((l) => l.debit > 0); out.cashAccount = pick((l) => l.credit > 0); }
@@ -308,7 +349,8 @@ export async function listEntries(db, userId, { from, to, kinds, accountId, cont
   const dir = order === 'ASC' ? 'ASC' : 'DESC';
   const total = (await db.get(`SELECT COUNT(*) AS n FROM entries e WHERE ${where}`, ...params)).n;
   const rows = await db.all(
-    `SELECT e.*, c.name AS contact_name FROM entries e LEFT JOIN contacts c ON c.id = e.contact_id
+    `SELECT e.*, c.name AS contact_name, cu.name AS created_by_name
+     FROM entries e LEFT JOIN contacts c ON c.id = e.contact_id LEFT JOIN users cu ON cu.id = e.created_by
      WHERE ${where} ORDER BY e.date ${dir}, e.id ${dir} LIMIT ? OFFSET ?`,
     ...params, limit, offset,
   );
@@ -353,17 +395,148 @@ export async function simpleLines(db, userId, t) {
   }
 }
 
+// ─────────────── Utang/piutang yang dicatat lewat jurnal manual ───────────────
+// Jurnal manual yang menyentuh akun utang/piutang otomatis dicatat juga di menu
+// Utang & Piutang. Kenaikan saldo akun = catatan utang baru; penurunan = pelunasan
+// yang memotong utang tertua pada akun yang sama (atau milik kontak yang dipilih).
+
+const JOURNAL_KINDS = ['manual', 'opening'];
+
+// Akun yang dianggap utang (payable) atau piutang (receivable).
+export const debtKindOf = (a) => {
+  if (a.type === 'liability' && (a.subtype === 'payable' || a.subtype === 'loan')) return 'payable';
+  if (a.type === 'asset' && a.subtype === 'receivable') return 'receivable';
+  return null;
+};
+
+async function journalDebtAccounts(db, entryId) {
+  const rows = await db.all('SELECT DISTINCT l.account_id, a.type, a.subtype FROM lines l JOIN accounts a ON a.id = l.account_id WHERE l.entry_id = ?', entryId);
+  return rows.filter((r) => debtKindOf(r)).map((r) => r.account_id);
+}
+
+// Mencocokkan pembayaran jurnal yang belum punya pasangan dengan utang yang masih terbuka.
+async function allocateUnmatched(db, userId, accountId) {
+  const acc = await db.get('SELECT id, type, subtype FROM accounts WHERE id = ? AND user_id = ?', accountId, userId);
+  const kind = acc && debtKindOf(acc);
+  if (!kind) return;
+  const pay = kind === 'payable' ? 'l.debit - l.credit' : 'l.credit - l.debit';
+  const payers = await db.all(
+    `SELECT e.id, e.date, e.contact_id, SUM(${pay}) AS amount
+     FROM entries e JOIN lines l ON l.entry_id = e.id
+     WHERE e.user_id = ? AND e.kind IN ('manual','opening') AND l.account_id = ?
+     GROUP BY e.id, e.date, e.contact_id
+     HAVING SUM(${pay}) > 0
+     ORDER BY e.date, e.id`,
+    userId, accountId,
+  );
+  if (!payers.length) return;
+  // Kunci dulu baris utangnya supaya pelunasan dari menu yang masuk bersamaan tidak tumpang tindih.
+  await db.all('SELECT id FROM debts WHERE user_id = ? AND account_id = ? ORDER BY id FOR UPDATE', userId, accountId);
+  for (const payer of payers) {
+    const done = (await db.get('SELECT COALESCE(SUM(p.amount), 0) AS n FROM debt_payments p JOIN debts d ON d.id = p.debt_id WHERE p.entry_id = ? AND d.account_id = ?', payer.id, accountId)).n;
+    let need = payer.amount - done;
+    if (need <= 0) continue;
+    const open = await db.all(
+      `SELECT d.id, d.amount - COALESCE((SELECT SUM(p.amount) FROM debt_payments p WHERE p.debt_id = d.id), 0) AS remaining
+       FROM debts d JOIN entries de ON de.id = d.entry_id
+       WHERE d.user_id = ? AND d.account_id = ? AND de.date <= ? AND d.entry_id != ? ${payer.contact_id ? 'AND d.contact_id = ?' : ''}
+       ORDER BY de.date, d.id`,
+      userId, accountId, payer.date, payer.id, ...(payer.contact_id ? [payer.contact_id] : []),
+    );
+    for (const d of open) {
+      if (need <= 0) break;
+      if (d.remaining <= 0) continue;
+      const take = Math.min(need, d.remaining);
+      await db.run('INSERT INTO debt_payments (debt_id, entry_id, amount, date) VALUES (?,?,?,?)', d.id, payer.id, take, payer.date);
+      need -= take;
+    }
+  }
+}
+
+// Menyamakan catatan utang/piutang dengan isi sebuah jurnal manual (dipanggil di dalam transaksi).
+export async function syncJournalDebts(db, userId, entryId, { dueDate } = {}) {
+  const entry = await db.get('SELECT * FROM entries WHERE id = ? AND user_id = ?', entryId, userId);
+  if (!entry || !JOURNAL_KINDS.includes(entry.kind)) return;
+  const lines = await db.all('SELECT l.account_id, l.debit, l.credit, a.type, a.subtype FROM lines l JOIN accounts a ON a.id = l.account_id WHERE l.entry_id = ?', entryId);
+  const net = new Map(); // akun utang → { kind, delta } ; delta > 0 berarti utang/piutang bertambah
+  for (const l of lines) {
+    const kind = debtKindOf(l);
+    if (!kind) continue;
+    const cur = net.get(l.account_id) || { kind, delta: 0 };
+    cur.delta += kind === 'payable' ? l.credit - l.debit : l.debit - l.credit;
+    net.set(l.account_id, cur);
+  }
+  const hadDebts = (await db.get('SELECT COUNT(*) AS n FROM debts WHERE entry_id = ?', entryId)).n;
+  const hadPays = (await db.get('SELECT COUNT(*) AS n FROM debt_payments WHERE entry_id = ?', entryId)).n;
+  if (!net.size && !hadDebts && !hadPays) return;
+
+  // Satu pembukuan diproses satu per satu supaya pencocokan pembayaran tidak saling menimpa.
+  await db.get('SELECT id FROM users WHERE id = ? FOR UPDATE', userId);
+
+  const touched = new Set(net.keys());
+  for (const r of await db.all('SELECT DISTINCT d.account_id FROM debt_payments p JOIN debts d ON d.id = p.debt_id WHERE p.entry_id = ?', entryId)) touched.add(r.account_id);
+  await db.run('DELETE FROM debt_payments WHERE entry_id = ?', entryId); // dicocokkan ulang di bawah
+
+  const existing = await db.all(
+    `SELECT d.*, COALESCE((SELECT SUM(p.amount) FROM debt_payments p WHERE p.debt_id = d.id), 0) AS paid,
+            (SELECT MIN(p.date) FROM debt_payments p WHERE p.debt_id = d.id) AS first_paid
+     FROM debts d WHERE d.entry_id = ?`,
+    entryId,
+  );
+  for (const d of existing) touched.add(d.account_id);
+
+  if (dueDate && dueDate < entry.date) throw bad('Jatuh tempo tidak boleh sebelum tanggal jurnal.');
+  for (const d of existing) {
+    const n = net.get(d.account_id);
+    if (n && n.delta > 0) continue;
+    if (d.paid > 0) throw bad('Jurnal ini mencatat utang/piutang yang sudah ada pembayarannya. Hapus dulu pembayarannya (di menu Utang & Piutang, atau jurnal pembayarannya di Jurnal Umum).');
+    await db.run('DELETE FROM debts WHERE id = ?', d.id);
+  }
+  for (const [accountId, n] of net) {
+    if (n.delta <= 0) continue;
+    const row = existing.find((d) => d.account_id === accountId);
+    if (row) {
+      if (n.delta < row.paid) throw bad(`Jumlah utang/piutang tidak boleh lebih kecil dari yang sudah dibayar (${row.paid.toLocaleString('id-ID')}).`);
+      if (row.first_paid && entry.date > row.first_paid) throw bad('Tanggal jurnal tidak boleh setelah tanggal pembayarannya.');
+      await db.run(
+        'UPDATE debts SET amount = ?, contact_id = ?, description = ?, due_date = ? WHERE id = ?',
+        n.delta, entry.contact_id, entry.description, dueDate === undefined ? row.due_date : dueDate, row.id,
+      );
+    } else {
+      await db.insert(
+        'INSERT INTO debts (user_id, kind, account_id, contact_id, entry_id, amount, due_date, description, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        userId, n.kind, accountId, entry.contact_id, entryId, n.delta, dueDate ?? null, entry.description, nowIso(),
+      );
+    }
+  }
+  for (const accountId of touched) await allocateUnmatched(db, userId, accountId);
+}
+
+// Dipakai sekali saat peningkatan versi: menyinkronkan jurnal manual lama.
+export async function backfillJournalDebts(db) {
+  const rows = await db.all(
+    `SELECT DISTINCT e.user_id, e.id, e.date FROM entries e
+     JOIN lines l ON l.entry_id = e.id JOIN accounts a ON a.id = l.account_id
+     WHERE e.kind IN ('manual','opening')
+       AND ((a.type = 'liability' AND a.subtype IN ('payable','loan')) OR (a.type = 'asset' AND a.subtype = 'receivable'))
+     ORDER BY e.user_id, e.date, e.id`,
+  );
+  for (const r of rows) await syncJournalDebts(db, r.user_id, r.id);
+}
+
 // ───────────────────────── Utang & piutang ─────────────────────────
 
 async function debtRows(db, userId, where = '', params = []) {
   return await db.all(
     `SELECT d.id, d.kind, d.amount, d.due_date, d.description, d.contact_id, d.entry_id, d.account_id,
-            e.date, c.name AS contact_name, a.name AS account_name,
+            e.date, e.kind AS entry_kind, c.name AS contact_name, a.name AS account_name,
+            i.id AS invoice_id, i.number AS invoice_number,
             COALESCE((SELECT SUM(p.amount) FROM debt_payments p WHERE p.debt_id = d.id), 0) AS paid
      FROM debts d
      JOIN entries e ON e.id = d.entry_id
      JOIN accounts a ON a.id = d.account_id
      LEFT JOIN contacts c ON c.id = d.contact_id
+     LEFT JOIN invoices i ON i.debt_id = d.id
      WHERE d.user_id = ? ${where}
      ORDER BY (d.due_date IS NULL), d.due_date, d.id`,
     userId, ...params,
@@ -377,6 +550,10 @@ function shapeDebt(r, today) {
     date: r.date, dueDate: r.due_date, description: r.description,
     contact: r.contact_id ? { id: r.contact_id, name: r.contact_name } : null,
     account: r.account_name,
+    // Asal catatan: dari menu ini ('menu'), dari jurnal manual ('journal'), atau dari faktur (invoice).
+    source: r.invoice_id ? 'invoice' : r.entry_kind === 'debt' ? 'menu' : 'journal',
+    entryId: r.entry_id,
+    invoice: r.invoice_id ? { id: r.invoice_id, number: r.invoice_number } : null,
     status: remaining <= 0 ? 'paid' : r.due_date && today && r.due_date < today ? 'overdue' : 'open',
   };
 }
@@ -387,9 +564,16 @@ export async function listDebts(db, userId, { today, kind, status } = {}) {
   else if (status === 'paid') items = items.filter((d) => d.status === 'paid');
   const ids = items.map((d) => d.id);
   const payments = ids.length
-    ? await db.all(`SELECT id, debt_id, amount, date FROM debt_payments WHERE debt_id IN (${ids.map(() => '?').join(',')}) ORDER BY date, id`, ...ids)
+    ? await db.all(
+      `SELECT p.id, p.debt_id, p.amount, p.date, p.entry_id, pe.kind AS entry_kind
+       FROM debt_payments p JOIN entries pe ON pe.id = p.entry_id
+       WHERE p.debt_id IN (${ids.map(() => '?').join(',')}) ORDER BY p.date, p.id`,
+      ...ids,
+    )
     : [];
-  for (const d of items) d.payments = payments.filter((p) => p.debt_id === d.id).map((p) => ({ id: p.id, amount: p.amount, date: p.date }));
+  for (const d of items) {
+    d.payments = payments.filter((p) => p.debt_id === d.id).map((p) => ({ id: p.id, amount: p.amount, date: p.date, source: p.entry_kind === 'debt_payment' ? 'menu' : 'journal', entryId: p.entry_id }));
+  }
   return items;
 }
 
@@ -399,7 +583,26 @@ export async function debtTotals(db, userId) {
   return out;
 }
 
-export async function createDebt(db, userId, body) {
+// Saldo utang/piutang menurut buku besar (yang dipakai Neraca). Kalau berbeda dari total di daftar,
+// artinya ada saldo yang belum tercatat sebagai catatan utang/piutang (mis. pembayaran jurnal yang
+// tidak punya utang pasangan), dan halaman Utang & Piutang menampilkan selisihnya.
+export async function debtLedger(db, userId) {
+  const rows = await db.all(
+    `SELECT a.type, a.subtype, COALESCE(SUM(l.debit), 0) AS d, COALESCE(SUM(l.credit), 0) AS c
+     FROM accounts a LEFT JOIN lines l ON l.account_id = a.id
+     WHERE a.user_id = ? GROUP BY a.id, a.type, a.subtype`,
+    userId,
+  );
+  const out = { payable: 0, receivable: 0 };
+  for (const r of rows) {
+    const kind = debtKindOf(r);
+    if (kind === 'payable') out.payable += r.c - r.d;
+    else if (kind === 'receivable') out.receivable += r.d - r.c;
+  }
+  return out;
+}
+
+export async function createDebt(db, userId, body, createdBy) {
   const kind = v.oneOf(body.kind, ['payable', 'receivable'], 'Jenis');
   const mode = v.oneOf(body.mode, ['cash', 'credit'], 'Cara');
   const amount = v.amount(body.amount);
@@ -437,7 +640,7 @@ export async function createDebt(db, userId, body) {
       const existing = await db.get('SELECT id FROM contacts WHERE user_id = ? AND lower(name) = lower(?)', userId, newName);
       contactId = existing?.id ?? await db.insert('INSERT INTO contacts (user_id, name, type, created_at) VALUES (?,?,?,?)', userId, newName, kind === 'payable' ? 'supplier' : 'customer', nowIso());
     }
-    const entryId = await createEntry(db, userId, { date, description, kind: 'debt', contactId, lines });
+    const entryId = await createEntry(db, userId, { date, description, kind: 'debt', contactId, lines, createdBy });
     return db.insert(
       'INSERT INTO debts (user_id, kind, account_id, contact_id, entry_id, amount, due_date, description, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
       userId, kind, account.id, contactId, entryId, amount, dueDate, description, nowIso(),
@@ -451,7 +654,7 @@ async function getDebt(db, userId, id) {
   return row;
 }
 
-export async function payDebt(db, userId, id, body) {
+export async function payDebt(db, userId, id, body, createdBy) {
   const amount = v.amount(body.amount);
   const date = v.date(body.date);
   await getDebt(db, userId, id); // pastikan milik pengguna ini sebelum mengunci
@@ -469,24 +672,35 @@ export async function payDebt(db, userId, id, body) {
       ? [{ accountId: debt.account_id, debit: amount, credit: 0 }, { accountId: cash.id, debit: 0, credit: amount }]
       : [{ accountId: cash.id, debit: amount, credit: 0 }, { accountId: debt.account_id, debit: 0, credit: amount }];
     const label = debt.kind === 'payable' ? 'Bayar utang' : 'Terima piutang';
-    const entryId = await createEntry(db, userId, { date, description: `${label}: ${debt.description}`.slice(0, 200), kind: 'debt_payment', contactId: debt.contact_id, lines });
+    const entryId = await createEntry(db, userId, { date, description: `${label}: ${debt.description}`.slice(0, 200), kind: 'debt_payment', contactId: debt.contact_id, lines, createdBy });
     return db.insert('INSERT INTO debt_payments (debt_id, entry_id, amount, date) VALUES (?,?,?,?)', debt.id, entryId, amount, date);
+  });
+}
+
+// Menghapus utang beserta pelunasannya dari menu (tanpa pemeriksaan asal; dipakai juga oleh faktur).
+export async function removeDebt(db, userId, debt) {
+  await db.tx(async () => {
+    // Hanya catatan pelunasan dari menu yang ikut dihapus. Jurnal manual yang kebetulan melunasi
+    // utang ini tidak disentuh (jurnalnya tetap milik pengguna).
+    const payments = await db.all("SELECT p.entry_id FROM debt_payments p JOIN entries e ON e.id = p.entry_id WHERE p.debt_id = ? AND e.kind = 'debt_payment'", debt.id);
+    for (const p of payments) await db.run('DELETE FROM entries WHERE id = ?', p.entry_id);
+    await db.run('DELETE FROM entries WHERE id = ?', debt.entry_id); // ikut menghapus catatan utangnya
+    await allocateUnmatched(db, userId, debt.account_id);
   });
 }
 
 export async function deleteDebt(db, userId, id) {
   const debt = await getDebt(db, userId, id);
-  await db.tx(async () => {
-    const payments = await db.all('SELECT entry_id FROM debt_payments WHERE debt_id = ?', debt.id);
-    for (const p of payments) await db.run('DELETE FROM entries WHERE id = ?', p.entry_id);
-    await db.run('DELETE FROM entries WHERE id = ?', debt.entry_id); // ikut menghapus catatan utangnya
-  });
+  if (debt.invoice_id) throw bad(`Piutang ini adalah faktur ${debt.invoice_number}. Hapus lewat menu Faktur.`);
+  if (debt.entry_kind !== 'debt') throw bad('Utang/piutang ini berasal dari jurnal manual. Ubah atau hapus lewat menu Jurnal Umum.');
+  await removeDebt(db, userId, debt);
 }
 
 export async function deleteDebtPayment(db, userId, debtId, paymentId) {
   const debt = await getDebt(db, userId, debtId);
-  const pay = await db.get('SELECT * FROM debt_payments WHERE id = ? AND debt_id = ?', v.id(paymentId), debt.id);
+  const pay = await db.get('SELECT p.*, e.kind AS entry_kind FROM debt_payments p JOIN entries e ON e.id = p.entry_id WHERE p.id = ? AND p.debt_id = ?', v.id(paymentId), debt.id);
   if (!pay) throw notFound('Pembayaran tidak ditemukan.');
+  if (pay.entry_kind !== 'debt_payment') throw bad('Pembayaran ini berasal dari jurnal manual. Ubah atau hapus jurnalnya di menu Jurnal Umum.');
   await db.run('DELETE FROM entries WHERE id = ?', pay.entry_id);
 }
 

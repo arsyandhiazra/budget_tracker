@@ -125,7 +125,12 @@ test('laporan keuangan cocok dengan hitungan manual dan selalu seimbang', async 
 
     // Utang piutang
     const debts = await get('/api/debts?today=2026-02-28');
-    assert.deepEqual(debts.totals, { payable: 3_600_000, receivable: 1_200_000 });
+    // Utang Rp3.000.000 dari jurnal manual "Beli etalase" ikut tampil, jadi total daftar = saldo Neraca.
+    assert.deepEqual(debts.totals, { payable: 6_600_000, receivable: 1_200_000 });
+    assert.deepEqual(debts.unlinked, { payable: 0, receivable: 0 }, 'daftar utang cocok dengan buku besar');
+    const etalase = debts.debts.find((d) => d.description === 'Beli etalase, sebagian dicicil');
+    assert.equal(etalase.amount, 3_000_000);
+    assert.equal(etalase.source, 'journal');
     const klien = debts.debts.find((d) => d.contact?.name === 'PT Klien');
     assert.equal(klien.remaining, 1_000_000);
     assert.equal(klien.status, 'overdue');
@@ -179,7 +184,7 @@ test('laporan keuangan cocok dengan hitungan manual dan selalu seimbang', async 
     // Cadangan data
     const backup = await get('/api/backup');
     assert.equal(backup.entries.length, 16);
-    assert.equal(backup.debts.length, 4);
+    assert.equal(backup.debts.length, 5, 'termasuk utang dari jurnal manual');
   } finally {
     await s.close();
   }
@@ -234,6 +239,9 @@ test('ubah & hapus: angka ikut berubah, catatan terhubung terlindungi', async ()
     });
     assert.equal(r.status, 200, JSON.stringify(r.data));
     assert.equal(await balance('Utang Usaha'), 600_000);
+    const afterEdit = (await c.get('/api/debts?today=2026-02-28')).data;
+    assert.equal(afterEdit.debts.some((d) => d.description.startsWith('Beli etalase')), false, 'utang dari jurnal hilang saat jurnal diubah jadi tunai');
+    assert.deepEqual(afterEdit.unlinked, { payable: 0, receivable: 0 });
 
     // Setelah semua perubahan, pembukuan tetap seimbang.
     const bs = (await c.get('/api/reports/balance-sheet?to=2026-12-31')).data;

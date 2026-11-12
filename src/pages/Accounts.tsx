@@ -1,6 +1,7 @@
 // Halaman Daftar Akun: dompet, kategori pemasukan/pengeluaran, utang, modal.
 import { useEffect, useState, type FormEvent } from "react";
 import { Archive, ArchiveRestore, Pencil, Plus, Trash2 } from "lucide-react";
+import { WriteOnly } from "@/lib/book";
 import { api, errorMessage, useData } from "@/lib/api";
 import { rp } from "@/lib/format";
 import { SUBTYPE_LABEL, SUBTYPES, TYPE_LABEL, type Account, type AccountType } from "@/lib/types";
@@ -140,9 +141,11 @@ export function AccountsPage() {
   return (
     <Page>
       <PageHeader title="Daftar Akun" description="Akun adalah “laci-laci” pembukuan: tiap uang masuk atau keluar dicatat ke laci yang sesuai. Dompet dan kategori juga termasuk akun.">
-        <Button onClick={() => setForm({ open: true, edit: null, type: "expense" })}>
-          <Plus className="h-4 w-4" aria-hidden /> Tambah akun
-        </Button>
+        <WriteOnly>
+          <Button onClick={() => setForm({ open: true, edit: null, type: "expense" })}>
+            <Plus className="h-4 w-4" aria-hidden /> Tambah akun
+          </Button>
+        </WriteOnly>
       </PageHeader>
       <DataState state={state}>
         {(data) => (
@@ -156,9 +159,11 @@ export function AccountsPage() {
                       <h2 className="font-bold tracking-tight">{g.title}</h2>
                       <p className="text-[13px] text-muted">{g.about}</p>
                     </div>
-                    <Button variant="secondary" size="sm" className="no-print" onClick={() => setForm({ open: true, edit: null, type: g.type })}>
-                      <Plus className="h-3.5 w-3.5" aria-hidden /> Tambah
-                    </Button>
+                    <WriteOnly>
+                      <Button variant="secondary" size="sm" className="no-print" onClick={() => setForm({ open: true, edit: null, type: g.type })}>
+                        <Plus className="h-3.5 w-3.5" aria-hidden /> Tambah
+                      </Button>
+                    </WriteOnly>
                   </div>
                   <div className="relative overflow-x-auto">
                     <table className="w-full min-w-[32rem]">
@@ -182,19 +187,21 @@ export function AccountsPage() {
                             </td>
                             <td className={`${td} tnum text-right font-semibold whitespace-nowrap`}>{rp(a.balance)}</td>
                             <td className={`${td} no-print w-32 text-right whitespace-nowrap`}>
-                              <Button variant="ghost" size="icon" aria-label={`Ubah ${a.name}`} title="Ubah" onClick={() => setForm({ open: true, edit: a, type: a.type })}>
-                                <Pencil className="h-4 w-4" aria-hidden />
-                              </Button>
-                              {!a.system &&
-                                (a.used ? (
-                                  <Button variant="ghost" size="icon" aria-label={a.archived ? `Aktifkan lagi ${a.name}` : `Arsipkan ${a.name}`} title={a.archived ? "Aktifkan lagi" : "Arsipkan (sembunyikan dari pilihan)"} onClick={() => toggleArchive(a)}>
-                                    {a.archived ? <ArchiveRestore className="h-4 w-4" aria-hidden /> : <Archive className="h-4 w-4" aria-hidden />}
-                                  </Button>
-                                ) : (
-                                  <Button variant="ghost" size="icon" aria-label={`Hapus ${a.name}`} title="Hapus" onClick={() => remove(a)}>
-                                    <Trash2 className="h-4 w-4" aria-hidden />
-                                  </Button>
-                                ))}
+                              <WriteOnly>
+                                <Button variant="ghost" size="icon" aria-label={`Ubah ${a.name}`} title="Ubah" onClick={() => setForm({ open: true, edit: a, type: a.type })}>
+                                  <Pencil className="h-4 w-4" aria-hidden />
+                                </Button>
+                                {!a.system &&
+                                  (a.used ? (
+                                    <Button variant="ghost" size="icon" aria-label={a.archived ? `Aktifkan lagi ${a.name}` : `Arsipkan ${a.name}`} title={a.archived ? "Aktifkan lagi" : "Arsipkan (sembunyikan dari pilihan)"} onClick={() => toggleArchive(a)}>
+                                      {a.archived ? <ArchiveRestore className="h-4 w-4" aria-hidden /> : <Archive className="h-4 w-4" aria-hidden />}
+                                    </Button>
+                                  ) : (
+                                    <Button variant="ghost" size="icon" aria-label={`Hapus ${a.name}`} title="Hapus" onClick={() => remove(a)}>
+                                      <Trash2 className="h-4 w-4" aria-hidden />
+                                    </Button>
+                                  ))}
+                              </WriteOnly>
                             </td>
                           </tr>
                         ))}

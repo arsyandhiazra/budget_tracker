@@ -46,6 +46,35 @@ export async function api<T = unknown>(path: string, { method = "GET", body }: O
   return data as T;
 }
 
+/** Mengirim file apa adanya (mis. Excel/CSV untuk impor). */
+export async function uploadFile<T = unknown>(path: string, file: Blob): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/octet-stream", "X-Requested-With": "BudgetTracker" },
+      body: file,
+    });
+  } catch {
+    throw new ApiError(0, "NETWORK", "Tidak bisa terhubung ke server. Periksa koneksi internet kamu.");
+  }
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* jawaban tanpa isi */
+  }
+  if (!res.ok) {
+    const err = data?.error ?? {};
+    const message = res.status === 413 ? "File terlalu besar (maksimal 3 MB). Bagi menjadi beberapa file." : (err.message ?? "Terjadi kesalahan. Coba lagi ya.");
+    const error = new ApiError(res.status, err.code ?? "ERROR", message, err);
+    if (res.status === 401 && error.code === "UNAUTHENTICATED") window.dispatchEvent(new Event("auth:expired"));
+    throw error;
+  }
+  return data as T;
+}
+
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : "Terjadi kesalahan. Coba lagi ya.");
 
 /** Membangun query string, melewati nilai kosong. */

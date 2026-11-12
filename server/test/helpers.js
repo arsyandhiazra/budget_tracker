@@ -20,9 +20,13 @@ export async function startServer({ ai, production = false, fetchImpl } = {}) {
   if (ai) config.ai = { ...config.ai, ...ai, enabled: true };
   const db = await testDb();
   const mails = [];
+  const api = { failMailTo: null };
   const mailer = {
     configured: true, // seperti SMTP aktif: kode TIDAK ikut dikembalikan ke browser
-    async send(mail) { mails.push(mail); },
+    async send(mail) {
+      if (api.failMailTo && mail.to === api.failMailTo) throw new Error('SMTP tes: sengaja gagal');
+      mails.push(mail);
+    },
   };
   const app = createApp({ db, config, mailer, fetchImpl });
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
@@ -65,6 +69,13 @@ export async function startServer({ ai, production = false, fetchImpl } = {}) {
     return mail ? mail.text.match(/\b(\d{6})\b/)[1] : null;
   };
 
+  // Jalan pintas: daftar + verifikasi saja (tanpa pengaturan awal).
+  async function register(c, { email, name = 'Pengguna Tes', password = 'rahasia-123' } = {}) {
+    await c.post('/api/auth/register', { name, email, password });
+    const r = await c.post('/api/auth/verify', { email, code: lastCode(email) });
+    return r.data.user;
+  }
+
   // Jalan pintas: daftar + verifikasi + pengaturan awal.
   async function signUp(c, { email, name = 'Pengguna Tes', password = 'rahasia-123', usage = 'usaha', openingCash = 0, openingBank = 0, date = '2026-01-01' } = {}) {
     await c.post('/api/auth/register', { name, email, password });
@@ -74,7 +85,9 @@ export async function startServer({ ai, production = false, fetchImpl } = {}) {
   }
 
   return {
-    base, db, config, mails, client, lastCode, signUp,
+    get failMailTo() { return api.failMailTo; },
+    set failMailTo(v) { api.failMailTo = v; },
+    app, base, db, config, mails, client, lastCode, signUp, register,
     limiter: app.locals.limiter,
     async close() {
       await new Promise((resolve) => server.close(resolve));

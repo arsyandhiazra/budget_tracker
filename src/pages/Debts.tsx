@@ -1,8 +1,9 @@
 // Halaman Utang & Piutang: siapa berutang ke siapa, kapan jatuh tempo, dan pelunasannya.
 import { useEffect, useState, type FormEvent } from "react";
-import { CircleCheck, Plus, Trash2 } from "lucide-react";
+import { BookOpenText, CircleCheck, Info, Plus, Receipt, Trash2 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { api, errorMessage, useData } from "@/lib/api";
+import { WriteOnly } from "@/lib/book";
 import { fmtDate, rp, today } from "@/lib/format";
 import type { Account, Contact, Debt } from "@/lib/types";
 import { Meter } from "@/components/charts";
@@ -275,7 +276,7 @@ function PayForm({ debt, onClose, onSaved }: { debt: Debt | null; onClose: () =>
 
 export function DebtsPage() {
   const { toast, confirm } = useFeedback();
-  const state = useData<{ debts: Debt[]; totals: Record<Kind, number> }>(`/debts?today=${today()}`);
+  const state = useData<{ debts: Debt[]; totals: Record<Kind, number>; unlinked: Record<Kind, number> }>(`/debts?today=${today()}`);
   const [tab, setTab] = useState<Kind>("payable");
   const [showPaid, setShowPaid] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -315,10 +316,12 @@ export function DebtsPage() {
 
   return (
     <Page>
-      <PageHeader title="Utang & Piutang" description="Utang = uang yang harus kamu bayar. Piutang = uang yang harus kamu terima dari orang lain.">
-        <Button onClick={() => setCreating(true)}>
-          <Plus className="h-4 w-4" aria-hidden /> Catat baru
-        </Button>
+      <PageHeader title="Utang & Piutang" description="Utang = uang yang harus kamu bayar. Piutang = uang yang harus kamu terima dari orang lain. Termasuk yang dicatat lewat faktur atau jurnal manual.">
+        <WriteOnly>
+          <Button onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" aria-hidden /> Catat baru
+          </Button>
+        </WriteOnly>
       </PageHeader>
 
       <DataState state={state}>
@@ -357,6 +360,24 @@ export function DebtsPage() {
                 )}
               </div>
 
+              {Math.abs(data.unlinked[tab]) > 0 && (
+                <p className="mb-3 flex gap-2.5 rounded-2xl border border-warn/40 bg-warn-soft px-4 py-3 text-[13px] text-ink-soft" role="note">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden />
+                  <span>
+                    {data.unlinked[tab] > 0 ? (
+                      <>
+                        Neraca mencatat <strong>{rp(data.unlinked[tab])}</strong> {tab === "payable" ? "utang" : "piutang"} lebih banyak daripada daftar ini, misalnya dari saldo awal atau jurnal yang akunnya diubah.
+                      </>
+                    ) : (
+                      <>
+                        Ada pelunasan lewat jurnal sebesar <strong>{rp(-data.unlinked[tab])}</strong> yang belum bisa dicocokkan dengan catatan {tab === "payable" ? "utang" : "piutang"} mana pun (belum ada catatannya, atau tanggal/kontaknya tidak cocok).
+                      </>
+                    )}{" "}
+                    Periksa di <a href="#/jurnal" className="font-semibold underline underline-offset-2">Jurnal Umum</a>.
+                  </span>
+                </p>
+              )}
+
               {list.length === 0 ? (
                 <Card>
                   <Empty icon={<CircleCheck className="h-5 w-5" aria-hidden />} title={tab === "payable" ? "Tidak ada utang yang belum lunas" : "Tidak ada piutang yang belum diterima"} text="Catatan baru akan muncul di sini, diurutkan dari jatuh tempo terdekat." />
@@ -370,6 +391,20 @@ export function DebtsPage() {
                           <div className="min-w-0 flex-1">
                             <p className="flex flex-wrap items-center gap-2 font-bold">
                               {d.contact?.name ?? "Tanpa nama"}
+                              {d.source === "journal" && (
+                                <a href="#/jurnal" title="Dicatat lewat jurnal manual. Ubah di Jurnal Umum.">
+                                  <Badge tone="neutral">
+                                    <BookOpenText className="h-3 w-3" aria-hidden /> Dari jurnal manual
+                                  </Badge>
+                                </a>
+                              )}
+                              {d.invoice && (
+                                <a href={`#/faktur/${d.invoice.id}`} title="Lihat faktur">
+                                  <Badge tone="masuk">
+                                    <Receipt className="h-3 w-3" aria-hidden /> Faktur {d.invoice.number}
+                                  </Badge>
+                                </a>
+                              )}
                               {d.status === "overdue" && <Badge tone="bad">Terlambat</Badge>}
                               {d.status === "paid" && (
                                 <Badge tone="good">
@@ -399,12 +434,23 @@ export function DebtsPage() {
                             <ul className="mt-2 divide-y divide-line rounded-xl border border-line">
                               {d.payments.map((p) => (
                                 <li key={p.id} className="flex items-center justify-between gap-3 px-3 py-2">
-                                  <span className="text-muted">{fmtDate(p.date)}</span>
+                                  <span className="text-muted">
+                                    {fmtDate(p.date)}
+                                    {p.source === "journal" && " · lewat jurnal manual"}
+                                  </span>
                                   <span className="flex items-center gap-2">
                                     <span className="tnum font-semibold">{rp(p.amount)}</span>
-                                    <Button variant="ghost" size="icon" className="no-print h-8 w-8" aria-label={`Hapus pembayaran ${fmtDate(p.date)}`} onClick={() => removePayment(d, p.id)}>
-                                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                                    </Button>
+                                    {p.source === "menu" ? (
+                                      <WriteOnly>
+                                        <Button variant="ghost" size="icon" className="no-print h-8 w-8" aria-label={`Hapus pembayaran ${fmtDate(p.date)}`} onClick={() => removePayment(d, p.id)}>
+                                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                                        </Button>
+                                      </WriteOnly>
+                                    ) : (
+                                      <a href="#/jurnal" className="no-print text-[13px] font-semibold text-muted underline underline-offset-2 hover:text-ink">
+                                        Jurnal
+                                      </a>
+                                    )}
                                   </span>
                                 </li>
                               ))}
@@ -412,13 +458,23 @@ export function DebtsPage() {
                           </details>
                         )}
                         <div className="no-print mt-4 flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => remove(d)}>
-                            <Trash2 className="h-3.5 w-3.5" aria-hidden /> Hapus
-                          </Button>
+                          {d.source === "menu" ? (
+                            <WriteOnly>
+                              <Button variant="ghost" size="sm" onClick={() => remove(d)}>
+                                <Trash2 className="h-3.5 w-3.5" aria-hidden /> Hapus
+                              </Button>
+                            </WriteOnly>
+                          ) : (
+                            <a href={d.invoice ? `#/faktur/${d.invoice.id}` : "#/jurnal"} className="text-[13px] font-semibold text-muted underline underline-offset-2 hover:text-ink">
+                              {d.invoice ? "Kelola di Faktur" : "Kelola di Jurnal Umum"}
+                            </a>
+                          )}
                           {d.status !== "paid" && (
-                            <Button size="sm" onClick={() => setPaying(d)}>
-                              {d.kind === "payable" ? "Bayar" : "Terima pembayaran"}
-                            </Button>
+                            <WriteOnly>
+                              <Button size="sm" onClick={() => setPaying(d)}>
+                                {d.kind === "payable" ? "Bayar" : "Terima pembayaran"}
+                              </Button>
+                            </WriteOnly>
                           )}
                         </div>
                       </Card>

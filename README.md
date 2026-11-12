@@ -9,14 +9,17 @@ lewat form sederhana, lalu aplikasi menyusun sendiri grafik dan laporan keuangan
 | --- | --- |
 | **Dasbor** | Total uang, pemasukan vs pengeluaran 6 bulan, pengeluaran per kategori, anggaran, tren saldo |
 | **Transaksi** | Catat pemasukan, pengeluaran, transfer antar dompet, setor modal, prive |
-| **Utang & Piutang** | Siapa berutang ke siapa, jatuh tempo, cicilan, penanda terlambat |
+| **Faktur** | Buat faktur untuk pelanggan (nomor otomatis, diskon, PPN), cetak atau simpan PDF, catat pembayarannya. Otomatis menjadi piutang |
+| **Utang & Piutang** | Siapa berutang ke siapa, jatuh tempo, cicilan, penanda terlambat. Termasuk yang berasal dari faktur dan jurnal manual |
 | **Anggaran** | Batas pengeluaran bulanan per kategori, dengan peringatan kalau hampir/lewat batas |
 | **Laporan** | Laba Rugi, Neraca, Arus Kas, Perubahan Modal, Neraca Saldo, Buku Besar, Jurnal Umum, Utang Piutang. Bisa unduh Excel dan cetak/PDF |
 | **Jurnal Umum** | Semua catatan dalam bentuk debit-kredit, plus jurnal manual |
 | **Daftar Akun** | Dompet (kas, bank, e-wallet) dan kategori |
 | **Kontak** | Pelanggan, pemasok, karyawan |
+| **Impor Data** | Memasukkan banyak transaksi sekaligus dari file Excel (.xlsx) atau CSV, dengan pratinjau dulu |
 | **Asisten** | Chatbot di pojok kanan bawah yang menjawab berdasarkan datamu |
-| **Akun** | Daftar dengan email, kode verifikasi, masuk, lupa kata sandi, ganti kata sandi, hapus akun |
+| **Pengaturan** | Profil, ganti email, ganti kata sandi, kop faktur, anggota & peran, tampilan terang/gelap, cadangan, hapus akun |
+| **Akun** | Daftar dengan email, kode verifikasi, masuk, lupa kata sandi |
 
 ## Cara menjalankan
 
@@ -58,6 +61,94 @@ laptop sendiri; jangan dibuat di server yang dipakai orang lain.
 > ditampilkan langsung di layar dan di terminal. Ini supaya aplikasi bisa dicoba
 > tanpa repot. Sebelum dipakai orang lain, atur email sungguhan (lihat di bawah).
 
+## Fitur-fitur yang dipakai bersama
+
+### Dipakai beberapa orang (anggota & peran)
+
+Satu pembukuan bisa dipakai bersama, misalnya pemilik usaha dan karyawan yang mencatat.
+Pemilik membuka **Pengaturan → Anggota & akses**, memasukkan email orangnya, dan memilih peran:
+
+| Peran | Boleh apa |
+| --- | --- |
+| **Pemilik** | Semuanya: mencatat, mengundang/mengeluarkan anggota, mengubah kop faktur, mengunduh cadangan |
+| **Pencatat** | Melihat dan mencatat/mengubah/menghapus data (transaksi, faktur, utang, kontak, impor). Tidak bisa mengelola anggota |
+| **Pelihat** | Hanya melihat dasbor, daftar, dan laporan. Boleh bertanya ke asisten. Tidak bisa mengubah apa pun |
+
+Cara kerjanya: orang yang diundang masuk (atau daftar dulu) memakai **email yang sama dengan
+undangan**, lalu menerima undangan di bagian atas halaman. Setelah itu ia bisa berpindah antara
+pembukuannya sendiri dan pembukuan yang dibagikan lewat pilihan **Sedang dibuka** di menu samping.
+Setiap catatan menyimpan siapa yang mencatatnya. Perubahan peran atau mengeluarkan anggota
+berlaku seketika.
+
+Yang perlu diketahui:
+
+- Email undangan dikirim lewat pengaturan email (`SMTP_...`) yang sama dengan kode verifikasi.
+  Kalau email gagal terkirim, undangannya tetap tersimpan dan langsung terlihat oleh orangnya
+  setelah ia masuk dengan email itu.
+- Undangan berlaku 14 hari. Satu pembukuan maksimal 20 anggota dan undangan.
+- Pemilik tidak bisa menghapus akunnya selama pembukuannya masih dibagikan. Keluarkan semua
+  anggota dulu, supaya data yang dipakai orang lain tidak hilang tanpa sengaja.
+
+### Faktur
+
+Menu **Faktur → Buat faktur**: pilih atau ketik pelanggan, isi barang/jasa (jumlah boleh
+desimal, mis. 1,5 jam), diskon, dan pajak (isi 11 untuk PPN 11%). Nomor otomatis berurutan per
+tahun (`INV-2026-0001`), atau isi nomor sendiri.
+
+- Faktur otomatis dicatat sebagai **piutang** dan **pendapatan** (dan **Utang Pajak (PPN)** kalau
+  memakai pajak; akunnya dibuat otomatis saat faktur pertama dengan pajak). Pelanggan baru
+  otomatis masuk ke Kontak.
+- Saat pelanggan membayar, tekan **Catat pembayaran** di halaman faktur. Pembayaran sebagian
+  boleh. Status berubah: *Belum dibayar → Dibayar sebagian → Lunas*, atau *Terlambat* kalau lewat
+  jatuh tempo.
+- **Cetak / simpan PDF** memakai fitur cetak browser: hanya dokumen faktur yang dicetak.
+  Nama usaha, alamat, telepon, dan info rekening di kop diatur di **Pengaturan → Pembukuan & faktur**.
+- Faktur yang sudah ada pembayarannya tidak bisa diubah isinya (hapus dulu pembayarannya).
+  Menghapus faktur ikut menghapus piutang dan pembayarannya.
+
+### Impor dari Excel atau CSV
+
+Menu **Impor Data**. Alurnya dua tahap supaya aman: pilih file → **periksa pratinjau** (belum ada
+yang tersimpan) → impor. Hasil impor tersimpan dalam satu paket: berhasil semua atau tidak sama sekali.
+
+- Unduh **template Excel** (memakai nama kategori dan dompet pembukuanmu), atau pakai file sendiri
+  dengan kolom: **Tanggal, Jenis** (Pemasukan/Pengeluaran), **Jumlah, Kategori, Dompet, Keterangan**.
+  Judul kolom boleh di baris mana saja dalam 15 baris pertama. Dikenali juga: dua kolom
+  *Pemasukan* dan *Pengeluaran* terpisah, atau satu kolom *Jumlah* dengan tanda minus untuk
+  pengeluaran (seperti mutasi rekening).
+- Tanggal ditulis hari/bulan/tahun (`31/01/2026`, `31 Jan 2026`) atau `2026-01-31`. Jumlah boleh
+  `1250000`, `1.250.000`, atau `Rp 1.250.000`. Maksimal 2.000 baris dan 3 MB per file.
+- Kategori yang belum ada bisa dibuat otomatis (bisa dimatikan). Kategori kosong memakai
+  kategori "lain-lain", dompet kosong memakai dompet bawaan yang kamu pilih.
+- **Duplikat dikenali** (tanggal, jenis, jumlah, keterangan, kategori, dan dompet sama persis dengan
+  transaksi yang sudah ada), jadi file yang sama tidak tercatat dua kali.
+- Yang diimpor: pemasukan dan pengeluaran. Transfer dan utang tetap dicatat dari menunya.
+  File `.xls` (Excel versi lama) belum dibaca; simpan dulu sebagai `.xlsx` atau `.csv`.
+
+### Utang yang dicatat lewat jurnal manual
+
+Jurnal manual yang menyentuh akun utang atau piutang (Utang Usaha, Utang Pinjaman, Piutang, atau akun
+buatanmu dengan jenis yang sama) otomatis muncul juga di **Utang & Piutang**, lengkap dengan kontak
+dan jatuh tempo yang kamu isi di formulir jurnal. Pelunasan lewat jurnal memotong utang tertua
+pada akun yang sama (atau milik kontak yang dipilih). Kalau ada selisih antara Neraca dan daftar
+itu, halaman Utang & Piutang menampilkannya.
+
+Catatan dari jurnal diubah atau dihapus lewat **Jurnal Umum**, bukan lewat tombol Hapus di Utang &
+Piutang. Jurnal yang utangnya sudah ada pembayarannya tidak bisa dihapus atau dikecilkan di bawah
+jumlah yang sudah dibayar.
+
+### Mengganti email akun
+
+**Pengaturan → Ganti email**: masukkan email baru dan kata sandi, lalu kode 6 angka dikirim ke
+email **baru** itu (untuk memastikan alamatnya milikmu). Setelah kode dimasukkan, email diganti,
+alamat lama diberi tahu, dan perangkat lain otomatis keluar. Mulai saat itu masuk dan kode
+verifikasi memakai email baru.
+
+### Tampilan terang dan gelap
+
+**Pengaturan → Tampilan** (atau tombol bulan/matahari di menu samping): *Terang*, *Gelap*, atau
+*Ikuti perangkat*. Pilihan tersimpan di browser itu saja. Saat dicetak, tampilan selalu terang.
+
 ## Pengaturan (file `.env`)
 
 Salin `.env.example` menjadi `.env`, lalu isi seperlunya. Setiap kali `.env` diubah,
@@ -94,7 +185,7 @@ Yang perlu kamu tahu:
 | --- | --- |
 | `npm run dev` | Mode pengembangan. Buka <http://localhost:5173>; perubahan kode langsung terlihat |
 | `npm run build` | Membuat ulang tampilan (folder `dist`). **Wajib dijalankan setelah mengubah isi folder `src`** |
-| `npm test` | Menjalankan tes otomatis bagian server (memakai database lokal sementara). Isi `TEST_DATABASE_URL` kalau mau menguji di Postgres sungguhan |
+| `npm test` | Menjalankan tes otomatis bagian server (memakai database lokal sementara). Isi `TEST_DATABASE_URL` kalau mau menguji di Postgres sungguhan; jalankan keduanya sebelum merilis |
 | `npm run typecheck` | Memeriksa kode tampilan |
 
 ## Susunan folder
@@ -105,15 +196,23 @@ server/            ← "dapur": menyimpan data, mengurus akun, menghitung lapora
   app.js             merakit server + pengaman
   db.js              struktur tabel + sambungan ke database (Postgres)
   accounting.js      inti pembukuan dan semua laporan
-  routes/auth.js     daftar, verifikasi, masuk, lupa kata sandi
+  invoices.js        faktur: hitungan, jurnal otomatis, pembayaran
+  import.js          impor Excel/CSV: pemeriksaan baris, deteksi duplikat, simpan massal
+  xlsx.js / xlsx-read.js   menulis dan membaca file Excel (tanpa pustaka tambahan)
+  table.js           membaca .xlsx atau .csv menjadi baris-baris
+  routes/auth.js     daftar, masuk, ganti email, pembukuan aktif, undangan
+  routes/team.js     anggota & peran, kop pembukuan
   routes/api.js      transaksi, utang-piutang, anggaran, laporan, kontak
+  routes/invoices.js faktur
+  routes/import.js   impor file
   routes/chat.js     chatbot
   ai/                penghubung ke penyedia AI + mode dasar
   test/              tes otomatis
 src/               ← "ruang makan": semua yang terlihat di layar
   pages/             satu file per halaman
-  components/        tombol, grafik, menu samping, chatbot
-  index.css          warna dan huruf (ubah di sini untuk ganti nuansa)
+  components/        tombol, grafik, menu samping, chatbot, anggota, ganti email
+  lib/               penghubung ke server, tema terang/gelap, peran pengguna
+  index.css          warna dan huruf, terang dan gelap (ubah di sini untuk ganti nuansa)
 dist/              ← tampilan yang sudah jadi (dibuat oleh npm run build)
 data/              ← database lokal untuk laptop (hanya muncul kalau DATABASE_URL kosong)
 ```
@@ -215,6 +314,12 @@ Tabel tidak perlu dibuat sendiri: aplikasi membuatnya otomatis saat pertama kali
 - **Cadangan.** Minta pengguna mengunduh cadangan dari menu Pengaturan secara berkala. Untuk
   seluruh database, pakai `pg_dump "$DATABASE_URL" > cadangan.sql`.
 - **Domain sendiri.** Di Vercel buka **Settings → Domains**, ikuti petunjuknya (gratis, domain-nya beli sendiri).
+- **Anggota & undangan butuh email.** Email undangan memakai `SMTP_...` yang sama. `APP_URL` boleh
+  dikosongkan di Vercel: tautan di email memakai alamat yang sedang dipakai pemilik.
+- **Memperbarui aplikasi.** Dorong kode ke `main`; Vercel men-deploy otomatis. Perubahan struktur database
+  dijalankan sendiri saat aplikasi pertama kali menyala, dan data lama dipertahankan (termasuk
+  jurnal manual lama yang kini tampil di Utang & Piutang).
+- **Batas unggahan.** Vercel membatasi isi permintaan sekitar 4,5 MB; impor dibatasi 3 MB per file.
 
 ### Memakai hosting lain
 
@@ -229,21 +334,27 @@ karena datanya ada di Postgres.
 - Sesi login memakai cookie `HttpOnly` yang tidak bisa dibaca skrip di halaman.
 - Percobaan login, daftar, dan kode verifikasi dibatasi supaya tidak bisa ditebak berulang-ulang
   (catatannya di database, jadi tetap berlaku di hosting serverless).
-- Setiap data selalu disaring per pemilik akun; pengguna lain tidak bisa melihat atau mengubahnya.
+- Setiap data selalu disaring per pembukuan; orang yang tidak diundang tidak bisa melihat atau
+  mengubahnya. Peran **Pelihat** ditolak di server (bukan sekadar tombol yang disembunyikan).
+- Undangan hanya bisa diterima oleh pemilik email yang diundang, dan email itu sudah diverifikasi saat daftar.
+- Ganti email butuh kata sandi + kode ke alamat baru, dan alamat lama diberi tahu.
+- File impor dibaca dengan batas ukuran (anti file "bom" zip), dan hanya lembar data yang dibaca.
 - Ganti/atur ulang kata sandi otomatis mengeluarkan perangkat lain.
 - Semua isian diperiksa di server, dan setiap jurnal dijamin seimbang (debit = kredit).
 
-## Yang belum ada
+## Batasan yang masih ada
 
-Supaya jelas dari awal, hal-hal ini belum dibuat:
+Supaya jelas, hal-hal ini belum dibuat:
 
-- Faktur/invoice
-- Satu pembukuan dipakai beberapa orang dengan hak akses berbeda
-- Mengganti alamat email akun
-- Mode gelap
-- Impor data dari Excel
-- Utang yang dicatat lewat jurnal manual tidak muncul di menu Utang & Piutang
-  (tetap terhitung di Neraca)
+- **Faktur**: belum bisa dikirim ke pelanggan langsung dari aplikasi (cetak atau simpan PDF lalu
+  kirim sendiri), belum ada faktur berulang, satu tarif pajak per faktur, dan hanya rupiah.
+- **Impor**: hanya pemasukan dan pengeluaran, dan belum membaca file `.xls` lama.
+- **Anggota**: hanya tiga peran (pemilik, pencatat, pelihat); kepemilikan pembukuan belum bisa
+  dipindahkan; tidak ada riwayat perubahan (yang tersimpan hanya siapa yang mencatat).
+- **Pelunasan lewat jurnal manual** dicocokkan otomatis ke utang tertua. Kalau ingin menentukan
+  sendiri utang mana yang dilunasi, pakai tombol **Bayar** di Utang & Piutang.
+- **Tema** terang/gelap dipilih per browser; tidak ikut berpindah ke perangkat lain.
+- Faktur/laporan dicetak lewat fitur cetak browser, jadi tampilannya mengikuti browser yang dipakai.
 
 ## Catatan soal zip asli
 

@@ -18,7 +18,7 @@ export function KindIcon({ kind }: { kind: EntryKind }) {
   const outgoing = kind === "expense" || kind === "drawing";
   const Icon = incoming ? ArrowDownLeft : outgoing ? ArrowUpRight : Repeat2;
   return (
-    <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full", incoming ? "bg-masuk-soft text-[#1c5cab]" : outgoing ? "bg-keluar-soft text-[#a8431a]" : "bg-paper text-muted")} aria-hidden>
+    <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full", incoming ? "bg-masuk-soft text-masuk-ink" : outgoing ? "bg-keluar-soft text-keluar-ink" : "bg-paper text-muted")} aria-hidden>
       <Icon className="h-4 w-4" />
     </span>
   );

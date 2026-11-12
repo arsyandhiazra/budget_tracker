@@ -1,11 +1,12 @@
 // Halaman Jurnal Umum: semua catatan dalam bentuk debit-kredit, plus jurnal manual.
 import { useEffect, useState, type FormEvent } from "react";
-import { CircleAlert, CircleCheck, Pencil, Plus, Trash2 } from "lucide-react";
+import { CircleAlert, CircleCheck, HandCoins, Pencil, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { api, errorMessage, qs, useData } from "@/lib/api";
+import { WriteOnly } from "@/lib/book";
 import { fmtDate, rp, today } from "@/lib/format";
 import { makePeriod } from "@/lib/period";
-import { TYPE_LABEL, type Account, type AccountType, type Entry } from "@/lib/types";
+import { TYPE_LABEL, type Account, type AccountType, type Contact, type Entry } from "@/lib/types";
 import { Page } from "@/components/Layout";
 import { PeriodPicker } from "@/components/PeriodPicker";
 import { Button, Card, DataState, Empty, ErrorBox, Field, Input, Modal, MoneyInput, PageHeader, Select, useFeedback } from "@/components/ui";
@@ -13,14 +14,20 @@ import { JournalTable } from "./Reports";
 
 type DraftLine = { key: number; accountId: string; debit: number; credit: number };
 const TYPES: AccountType[] = ["asset", "liability", "equity", "income", "expense"];
+// Akun yang dianggap utang/piutang (sama dengan aturan di server): jurnal yang menyentuhnya
+// otomatis tercatat juga di menu Utang & Piutang.
+const isDebtAccount = (a: Account) => (a.type === "liability" && (a.subtype === "payable" || a.subtype === "loan")) || (a.type === "asset" && a.subtype === "receivable");
 let nextKey = 1;
 const blank = (): DraftLine => ({ key: nextKey++, accountId: "", debit: 0, credit: 0 });
 
 function JournalForm({ open, edit, onClose, onSaved }: { open: boolean; edit: Entry | null; onClose: () => void; onSaved: () => void }) {
   const { toast } = useFeedback();
   const accounts = useData<{ accounts: Account[] }>(open ? "/accounts" : null);
+  const contacts = useData<{ contacts: Contact[] }>(open ? "/contacts" : null);
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([blank(), blank()]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,10 +37,14 @@ function JournalForm({ open, edit, onClose, onSaved }: { open: boolean; edit: En
     setError(null);
     setDate(edit?.date ?? today());
     setDescription(edit?.description ?? "");
+    setContactId(edit?.contact ? String(edit.contact.id) : "");
+    setDueDate(edit?.debts?.[0]?.dueDate ?? "");
     setLines(edit ? edit.lines.map((l) => ({ key: nextKey++, accountId: String(l.accountId), debit: l.debit, credit: l.credit })) : [blank(), blank()]);
   }, [open, edit]);
 
   const all = accounts.data?.accounts ?? [];
+  const debtIds = new Set(all.filter(isDebtAccount).map((a) => String(a.id)));
+  const touchesDebt = lines.some((l) => debtIds.has(l.accountId));
   const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
   const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
   const balanced = totalDebit === totalCredit && totalDebit > 0;
@@ -47,7 +58,14 @@ function JournalForm({ open, edit, onClose, onSaved }: { open: boolean; edit: En
     if (filled.some((l) => !l.accountId)) return setError("Ada baris yang akunnya belum dipilih.");
     if (filled.some((l) => !l.debit && !l.credit)) return setError("Ada baris yang jumlahnya masih kosong.");
     if (!balanced) return setError("Total debit dan kredit harus sama.");
-    const body = { date, description, lines: filled.map((l) => ({ accountId: Number(l.accountId), debit: l.debit, credit: l.credit })) };
+    const body = {
+      date,
+      description,
+      lines: filled.map((l) => ({ accountId: Number(l.accountId), debit: l.debit, credit: l.credit })),
+      // Kontak & jatuh tempo hanya ditanyakan untuk jurnal utang/piutang; kontak lama tetap dipertahankan kalau tidak.
+      contactId: touchesDebt ? (contactId ? Number(contactId) : null) : (edit?.contact?.id ?? null),
+      ...(touchesDebt ? { dueDate: dueDate || null } : {}),
+    };
     setBusy(true);
     setError(null);
     try {
@@ -133,6 +151,33 @@ function JournalForm({ open, edit, onClose, onSaved }: { open: boolean; edit: En
             </p>
           </div>
         </div>
+        {touchesDebt && (
+          <div className="rounded-2xl border border-masuk/40 bg-masuk-soft p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <HandCoins className="h-4 w-4 text-masuk-ink" aria-hidden /> Jurnal ini menyentuh akun utang/piutang
+            </p>
+            <p className="mt-1 text-[13px] text-ink-soft">
+              Otomatis tercatat juga di menu <strong>Utang & Piutang</strong>. Kalau jurnal ini berupa pembayaran, jumlahnya memotong utang yang paling lama (atau milik kontak yang dipilih).
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Kontak" hint="Boleh dikosongkan.">
+                {(id) => (
+                  <Select id={id} value={contactId} onChange={(e) => setContactId(e.target.value)}>
+                    <option value="">Tanpa nama</option>
+                    {(contacts.data?.contacts ?? []).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+              <Field label="Jatuh tempo" hint="Untuk utang/piutang baru. Boleh dikosongkan.">
+                {(id) => <Input id={id} type="date" value={dueDate} min={date} onChange={(e) => setDueDate(e.target.value)} />}
+              </Field>
+            </div>
+          </div>
+        )}
         <p className="rounded-2xl bg-paper px-4 py-3 text-[13px] text-ink-soft">
           <strong>Cara gampang mengingatnya:</strong> harta atau beban yang <em>bertambah</em> ditulis di debit. Utang, modal, atau pendapatan yang <em>bertambah</em> ditulis di kredit. Kalau berkurang, kebalikannya.
         </p>
@@ -179,18 +224,25 @@ export function JournalPage() {
     const editable = e.kind === "manual" || e.kind === "opening";
     return (
       <span className="inline-flex">
-        {editable ? (
-          <Button variant="ghost" size="icon" aria-label={`Ubah ${e.description}`} title="Ubah" onClick={() => setForm({ open: true, edit: e })}>
-            <Pencil className="h-4 w-4" aria-hidden />
-          </Button>
-        ) : (
-          <a href="#/transaksi" title="Ubah di halaman Transaksi" aria-label={`Ubah ${e.description} di halaman Transaksi`} className="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-paper">
-            <Pencil className="h-4 w-4" aria-hidden />
+        {e.debts && e.debts.length > 0 && (
+          <a href="#/utang-piutang" title="Tercatat juga di Utang & Piutang" aria-label={`${e.description} tercatat di Utang & Piutang`} className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-masuk-ink hover:bg-paper">
+            <HandCoins className="h-4 w-4" aria-hidden />
           </a>
         )}
-        <Button variant="ghost" size="icon" aria-label={`Hapus ${e.description}`} title="Hapus" onClick={() => remove(e)}>
-          <Trash2 className="h-4 w-4" aria-hidden />
-        </Button>
+        <WriteOnly>
+          {editable ? (
+            <Button variant="ghost" size="icon" aria-label={`Ubah ${e.description}`} title="Ubah" onClick={() => setForm({ open: true, edit: e })}>
+              <Pencil className="h-4 w-4" aria-hidden />
+            </Button>
+          ) : (
+            <a href="#/transaksi" title="Ubah di halaman Transaksi" aria-label={`Ubah ${e.description} di halaman Transaksi`} className="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-paper">
+              <Pencil className="h-4 w-4" aria-hidden />
+            </a>
+          )}
+          <Button variant="ghost" size="icon" aria-label={`Hapus ${e.description}`} title="Hapus" onClick={() => remove(e)}>
+            <Trash2 className="h-4 w-4" aria-hidden />
+          </Button>
+        </WriteOnly>
       </span>
     );
   };
@@ -199,9 +251,11 @@ export function JournalPage() {
     <Page>
       <PageHeader title="Jurnal Umum" description="Setiap transaksi otomatis ditulis di sini sebagai debit dan kredit. Kamu juga bisa menambah jurnal manual untuk transaksi khusus.">
         <PeriodPicker value={period} onChange={setPeriod} />
-        <Button onClick={() => setForm({ open: true, edit: null })}>
-          <Plus className="h-4 w-4" aria-hidden /> Tambah jurnal
-        </Button>
+        <WriteOnly>
+          <Button onClick={() => setForm({ open: true, edit: null })}>
+            <Plus className="h-4 w-4" aria-hidden /> Tambah jurnal
+          </Button>
+        </WriteOnly>
       </PageHeader>
       <DataState state={state}>
         {(data) => (
